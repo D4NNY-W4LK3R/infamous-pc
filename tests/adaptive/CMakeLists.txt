@@ -27,6 +27,16 @@ else()
     FetchContent_MakeAvailable(googletest)
 endif()
 
+# googletest 1.17 builds itself with warnings as errors; Clang 22 (Visual Studio 18's clang-cl)
+# added -Wcharacter-conversion, which fires inside googletest's own headers.
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    foreach(t gtest gtest_main)
+        if (TARGET ${t})
+            target_compile_options(${t} PRIVATE -Wno-unknown-warning-option -Wno-character-conversion)
+        endif()
+    endforeach()
+endif()
+
 set(SRC ${CMAKE_CURRENT_SOURCE_DIR}/../../src)
 set(ADAPTIVE_SOURCES
     ${SRC}/adaptive/brain.cpp
