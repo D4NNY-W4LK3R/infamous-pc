@@ -213,9 +213,10 @@ void GameController::SetTouchpadState(int touch_index, bool touch_down, float x,
 void GameController::SwipeTouchpad(float from_x, float from_y, float to_x, float to_y,
                                    int fingers) {
     // Games read the touchpad every frame, so the finger has to move for a few of them to see
-    // a swipe rather than a tap: about 160 ms in steps short enough to land in each frame.
-    static constexpr int Steps = 16;
-    static constexpr auto StepTime = std::chrono::milliseconds{10};
+    // a swipe rather than a tap: about 300 ms in steps short enough to land in each frame, so a
+    // game running at 30 fps still sees the finger in about nine places along the way.
+    static constexpr int Steps = 20;
+    static constexpr auto StepTime = std::chrono::milliseconds{15};
     fingers = std::clamp(fingers, 1, 2);
     // Two fingers sit either side of the line the swipe follows, across its direction.
     const bool horizontal = std::abs(to_x - from_x) >= std::abs(to_y - from_y);

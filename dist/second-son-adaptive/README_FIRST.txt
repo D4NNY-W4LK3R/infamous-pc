@@ -31,6 +31,8 @@ CONTROLS (keyboard and mouse)
   C                    melee (Square)                 F       Karmic / interact (Triangle)
   Q / E                special (L1) / heavy (R1)       U / O   L3 / R3
   R / Y                touchpad left / right           Tab     touchpad press
+  Z / X  or wheel      swipe the touchpad up / down    V / B   swipe left / right
+                       (arrow prompts such as lifting wreckage)
   Enter or Esc         pause (Options)                 Arrows  D-pad
   G / H                tilt the controller left / right (spray can)     T  shake
   Delete               mouse = touchpad (fingerprint scanners); press again to go back
@@ -39,7 +41,7 @@ CONTROLS (keyboard and mouse)
   F10 FPS counter      F11 fullscreen      F12 screenshot      F9 pause the emulator
   A DualSense / DualShock 4 / Xbox pad works at the same time.
   The layout lives in user\input_config\CUSA00004.ini (EU) or CUSA00223.ini (US) - edit freely;
-  it is only written when it does not exist yet. Second Son always uses this file, even if the
+  it is only written when it does not exist yet (the swipe keys are added to older copies). Second Son always uses this file, even if the
   emulator is set to share one input config between games.
 
   Mouse look needs a recognized game executable. The log says either

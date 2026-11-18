@@ -163,6 +163,14 @@ touchpad_center = tab
 options = enter
 options = escape
 
+# Touchpad swipes, for the game's arrow prompts (lifting wreckage, opening doors ...)
+touchpad_swipe_up = z
+touchpad_swipe_up = mousewheelup
+touchpad_swipe_down = x
+touchpad_swipe_down = mousewheeldown
+touchpad_swipe_left = v
+touchpad_swipe_right = b
+
 pad_up = up
 pad_down = down
 pad_left = left
@@ -210,6 +218,33 @@ analog_deadzone = rightjoystick, 5, 127
 
 override_controller_color = false, 0, 0, 255
 )";
+}
+
+/// Layouts written by builds before the swipe keys existed get them added at the end, once.
+/// Only a file this build family wrote (its first line) is touched, and nothing is removed.
+static void AddSecondSonSwipes(const std::filesystem::path& config_file) {
+    std::ifstream in(config_file);
+    std::string first, line;
+    std::getline(in, first);
+    if (first.rfind("# inFAMOUS Second Son - PC keyboard and mouse layout", 0) != 0) {
+        return;
+    }
+    while (std::getline(in, line)) {
+        if (line.find("touchpad_swipe") != std::string::npos) {
+            return;
+        }
+    }
+    in.close();
+    std::ofstream out(config_file, std::ios::app);
+    out << "\n" << R"(# Touchpad swipes, for the game's arrow prompts (lifting wreckage, opening doors ...)
+touchpad_swipe_up = z
+touchpad_swipe_up = mousewheelup
+touchpad_swipe_down = x
+touchpad_swipe_down = mousewheeldown
+touchpad_swipe_left = v
+touchpad_swipe_right = b
+)";
+    LOG_INFO(Input, "Added the touchpad swipe keys to {}", config_file.string());
 }
 
 bool IsSecondSonSerial(const std::string& id) {
@@ -277,6 +312,14 @@ std::string PadName(const std::string& out) {
         {"touchpad_left", "Touchpad left"},
         {"touchpad_center", "Touchpad"},
         {"touchpad_right", "Touchpad right"},
+        {"touchpad_swipe_up", "Swipe up"},
+        {"touchpad_swipe_down", "Swipe down"},
+        {"touchpad_swipe_left", "Swipe left"},
+        {"touchpad_swipe_right", "Swipe right"},
+        {"touchpad_swipe2_up", "2-finger swipe up"},
+        {"touchpad_swipe2_down", "2-finger swipe down"},
+        {"touchpad_swipe2_left", "2-finger swipe left"},
+        {"touchpad_swipe2_right", "2-finger swipe right"},
         {"pad_up", "D-pad up"},
         {"pad_down", "D-pad down"},
         {"pad_left", "D-pad left"},
@@ -466,6 +509,8 @@ std::filesystem::path GetInputConfigFile(const std::string& game_id) {
         } else {
             std::filesystem::copy(default_config_file, config_file);
         }
+    } else if (IsSecondSonSerial(game_id)) {
+        AddSecondSonSwipes(config_file);
     }
     return config_file;
 }
@@ -1050,44 +1095,37 @@ void ControllerOutput::FinalizeUpdate(u8 gamepad_index) {
             controller->Button(SDLGamepadToOrbisButton(button), new_button_state);
             break;
         case SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_LEFT:
-            if (new_button_state) {
-                LOG_INFO(Input, "touchpad swipe output fired");
-                controller->SwipeTouchpad(0.85f, 0.5f, 0.15f, 0.5f);
-            }
-            break;
         case SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_RIGHT:
-            if (new_button_state) {
-                controller->SwipeTouchpad(0.15f, 0.5f, 0.85f, 0.5f);
-            }
-            break;
         case SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_UP:
-            if (new_button_state) {
-                controller->SwipeTouchpad(0.5f, 0.85f, 0.5f, 0.15f);
-            }
-            break;
         case SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_DOWN:
-            if (new_button_state) {
-                controller->SwipeTouchpad(0.5f, 0.15f, 0.5f, 0.85f);
-            }
-            break;
         case SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE2_LEFT:
-            if (new_button_state) {
-                controller->SwipeTouchpad(0.85f, 0.5f, 0.15f, 0.5f, 2);
-            }
-            break;
         case SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE2_RIGHT:
-            if (new_button_state) {
-                controller->SwipeTouchpad(0.15f, 0.5f, 0.85f, 0.5f, 2);
-            }
-            break;
         case SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE2_UP:
-            if (new_button_state) {
-                controller->SwipeTouchpad(0.5f, 0.85f, 0.5f, 0.15f, 2);
-            }
-            break;
         case SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE2_DOWN:
             if (new_button_state) {
-                controller->SwipeTouchpad(0.5f, 0.15f, 0.5f, 0.85f, 2);
+                // Edge to edge, as a thumb does: a short slide in the middle of the pad is
+                // too small for some prompts.
+                static constexpr float Near = 0.08f, Far = 0.92f;
+                const int first = SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_LEFT;
+                const int index = static_cast<int>(button) - first;
+                const int fingers = index >= 4 ? 2 : 1;
+                static constexpr const char* Dir[4] = {"left", "right", "up", "down"};
+                switch (index % 4) {
+                case 0:
+                    controller->SwipeTouchpad(Far, 0.5f, Near, 0.5f, fingers);
+                    break;
+                case 1:
+                    controller->SwipeTouchpad(Near, 0.5f, Far, 0.5f, fingers);
+                    break;
+                case 2:
+                    controller->SwipeTouchpad(0.5f, Far, 0.5f, Near, fingers);
+                    break;
+                default:
+                    controller->SwipeTouchpad(0.5f, Near, 0.5f, Far, fingers);
+                    break;
+                }
+                LOG_INFO(Input, "touchpad swipe {} ({} finger{})", Dir[index % 4], fingers,
+                         fingers == 2 ? "s" : "");
             }
             break;
         case SDL_GAMEPAD_BUTTON_TOUCHPAD_FINGER1:
