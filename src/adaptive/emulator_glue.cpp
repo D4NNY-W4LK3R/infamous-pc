@@ -25,6 +25,9 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+#ifdef _MSC_VER
+#include <intrin.h>
+#endif
 
 namespace Adaptive::Glue {
 
