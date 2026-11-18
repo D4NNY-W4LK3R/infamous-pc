@@ -1,0 +1,137 @@
+# SPDX-FileCopyrightText: 2026 shadPS4 Emulator Project
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+# Second Son Adaptive: Windows x64 build, tests and packaged release, on GitHub's runners.
+# Nothing is installed on the player's PC. Every push to a second-son-adaptive* branch builds,
+# runs the adaptive unit tests, packages the release folder and publishes it as a pre-release.
+
+name: Second Son Adaptive
+
+on:
+  push:
+    branches: ["second-son-adaptive*"]
+  workflow_dispatch:
+
+concurrency:
+  group: ssa-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  unit-tests-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build and run adaptive optimizer unit tests (GCC + Clang, sanitizers)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f tests/adaptive/CMakeLists.txt ]; then echo "no adaptive tests on this commit"; exit 0; fi
+          git clone -q --depth 1 --branch v1.17.0 https://github.com/google/googletest.git /tmp/gtest
+          for cc in "gcc g++" "clang clang++"; do
+            set -- $cc
+            cmake -S tests/adaptive -B build-$1 -G "Unix Makefiles" -DCMAKE_C_COMPILER=$1 -DCMAKE_CXX_COMPILER=$2 \
+              -DGTEST_SOURCE_DIR=/tmp/gtest -DADAPTIVE_SANITIZE=ON
+            cmake --build build-$1 -j 4
+            ./build-$1/adaptive_tests --gtest_brief=1
+          done
+
+  windows:
+    runs-on: windows-2025-vs2026
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Record source pins
+        shell: bash
+        run: |
+          mkdir -p out
+          { echo "superproject $(git rev-parse HEAD)"; git describe --tags --always; git submodule status --recursive; } > out/SOURCE_PINS.txt
+          cat out/SOURCE_PINS.txt | head -5
+
+      - name: Cache CMake Build
+        uses: hendrikmuhs/ccache-action@v1.2.21
+        with:
+          append-timestamp: false
+          key: ssa-win-ccache-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
+
+      - name: Configure
+        run: cmake --fresh -G Ninja -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE=ON -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_EXE_LINKER_FLAGS=/MAP
+
+      - name: Build emulator
+        shell: pwsh
+        run: |
+          cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel $env:NUMBER_OF_PROCESSORS 2>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) {
+            # Errors reach the check-run annotations, readable without the log viewer.
+            $errs = Select-String -Path build.log -Pattern 'error:|error [A-Z]+[0-9]+|FAILED:' | Select-Object -First 25
+            foreach ($e in $errs) { $l = $e.Line -replace '%','%25' -replace "`r",'' ; Write-Output "::error title=build::$l" }
+            exit 1
+          }
+
+      - name: Build and run adaptive tests (MSVC ABI, clang-cl)
+        shell: pwsh
+        run: |
+          if (!(Test-Path tests/adaptive/CMakeLists.txt)) { Write-Output "no adaptive tests on this commit"; exit 0 }
+          git clone -q --depth 1 --branch v1.17.0 https://github.com/google/googletest.git $env:RUNNER_TEMP/gtest
+          cmake -S tests/adaptive -B build-tests -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DGTEST_SOURCE_DIR="$env:RUNNER_TEMP/gtest"
+          cmake --build build-tests
+          ./build-tests/adaptive_tests.exe --gtest_brief=1 2>&1 | Tee-Object -FilePath tests.log
+          if ($LASTEXITCODE -ne 0) {
+            Select-String -Path tests.log -Pattern 'Failure|FAILED' | Select-Object -First 20 | ForEach-Object { Write-Output "::error title=tests::$($_.Line)" }
+            exit 1
+          }
+
+      - name: Smoke test the executable
+        shell: pwsh
+        run: |
+          $exe = "${{github.workspace}}/build/shadPS4.exe"
+          if (!(Test-Path $exe)) { Write-Output "::error::shadPS4.exe missing"; exit 1 }
+          $p = Start-Process -FilePath $exe -ArgumentList '--help' -PassThru -NoNewWindow -RedirectStandardOutput help.txt -RedirectStandardError help_err.txt
+          if (!$p.WaitForExit(60000)) { $p.Kill(); Write-Output "::error::--help did not return in 60 s"; exit 1 }
+          Get-Content help.txt -TotalCount 15
+          if ((Get-Item help.txt).Length -eq 0 -and (Get-Item help_err.txt).Length -eq 0) { Write-Output "::warning::--help printed nothing" }
+          if (Test-Path build/adaptive_selftest.exe) { ./build/adaptive_selftest.exe }
+
+      - name: Package release folder
+        shell: pwsh
+        run: |
+          $pkg = "out/SecondSonAdaptive"
+          New-Item -ItemType Directory -Force $pkg | Out-Null
+          Copy-Item build/shadPS4.exe $pkg/
+          if (Test-Path dist/second-son-adaptive) { Copy-Item -Recurse -Force dist/second-son-adaptive/* $pkg/ }
+          Copy-Item out/SOURCE_PINS.txt $pkg/
+          Copy-Item LICENSE $pkg/LICENSE.txt
+          $hash = (Get-FileHash $pkg/shadPS4.exe -Algorithm SHA256).Hash
+          "shadPS4.exe SHA256 $hash" | Out-File -Encoding ascii $pkg/SHA256.txt
+          Compress-Archive -Path "$pkg/*" -DestinationPath out/SecondSonAdaptive-windows-x64.zip -Force
+          Write-Output "exe sha256 $hash"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SecondSonAdaptive-windows-x64-${{ github.sha }}
+          path: out/SecondSonAdaptive-windows-x64.zip
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SecondSonAdaptive-linker-map-${{ github.sha }}
+          path: build/shadPS4.map
+          if-no-files-found: warn
+
+      - name: Publish pre-release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          short=$(git rev-parse --short=8 HEAD)
+          tag="ssa-${GITHUB_REF_NAME//\//-}-${GITHUB_RUN_NUMBER}-${short}"
+          gh release create "$tag" out/SecondSonAdaptive-windows-x64.zip --target "$GITHUB_SHA" --prerelease \
+            --title "Second Son Adaptive build ${GITHUB_RUN_NUMBER} (${short})" \
+            --notes "Automated build of ${GITHUB_REF_NAME} at ${GITHUB_SHA}. Download SecondSonAdaptive-windows-x64.zip, extract it to E:\\SecondSonAdaptive and read README_FIRST.txt."

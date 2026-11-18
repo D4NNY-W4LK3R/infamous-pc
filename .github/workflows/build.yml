@@ -5,7 +5,8 @@ name: Build and Release
 
 on:
   push:
-    branches-ignore: [Pre-release-shadPS4-*]
+    # second-son-adaptive* branches are built by second-son-adaptive.yml instead.
+    branches-ignore: [Pre-release-shadPS4-*, "second-son-adaptive*"]
     paths-ignore:
       - "documents/**"
       - "**/*.md"
