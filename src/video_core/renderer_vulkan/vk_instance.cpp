@@ -5,6 +5,7 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
+#include "adaptive/emulator_glue.h"
 #include "common/assert.h"
 #include "common/debug.h"
 #include "common/types.h"
@@ -176,6 +177,18 @@ Instance::Instance(Frontend::WindowSDL& window, s32 physical_device_index,
     CollectPhysicalMemoryInfo();
     CollectImageFormatInfo();
     CollectToolingInfo();
+
+    // Second Son Adaptive: the GPU the renderer really uses, for the optimizer's hardware profile.
+    u64 device_local = 0;
+    for (u32 i = 0; i < memory_properties.memoryHeapCount; ++i) {
+        if (memory_properties.memoryHeaps[i].flags & vk::MemoryHeapFlagBits::eDeviceLocal) {
+            device_local += memory_properties.memoryHeaps[i].size;
+        }
+    }
+    Adaptive::Glue::ReportVulkanDevice(std::string(GetModelName()), properties.vendorID,
+                                       properties.deviceID, properties.driverVersion,
+                                       properties.apiVersion, device_local, total_memory_budget,
+                                       supports_memory_budget, IsIntegrated());
 }
 
 Instance::~Instance() {
@@ -848,6 +861,22 @@ u64 Instance::GetDeviceMemoryUsage() const {
         total_usage += memory_budget_props.heapUsage[heap];
     }
     return total_usage;
+}
+
+u64 Instance::GetDeviceMemoryBudget() const {
+    if (!supports_memory_budget) {
+        return 0;
+    }
+    vk::PhysicalDeviceMemoryBudgetPropertiesEXT memory_budget_props{};
+    vk::PhysicalDeviceMemoryProperties2 props = {
+        .pNext = &memory_budget_props,
+    };
+    physical_device.getMemoryProperties2(&props);
+    u64 total_budget = 0;
+    for (const size_t heap : valid_heaps) {
+        total_budget += memory_budget_props.heapBudget[heap];
+    }
+    return total_budget;
 }
 
 vk::FormatFeatureFlags2 Instance::GetFormatFeatureFlags(vk::Format format) const {

@@ -2326,6 +2326,27 @@ static void PatchesInit() {
     }
 }
 
+/// Native mouse camera (core/mouse_aim.cpp): reserves code space in a module's trampoline area,
+/// within rel32 reach of its code, for a hand-written code cave. Ported from the
+/// shadPS4-second-son v1.1.1 native keyboard/mouse fork. nullptr when the area is full.
+u8* AllocateTrampolineSpace(const void* module_address, u64 size) {
+    auto* module = GetModule(module_address);
+    if (module == nullptr || static_cast<const u8*>(module_address) >= module->end) {
+        return nullptr;
+    }
+    std::scoped_lock lk{module->mutex};
+    auto& gen = module->trampoline_gen;
+    const size_t old_size = gen.getSize();
+    const u64 start = Common::AlignUp(old_size, 64);
+    try {
+        gen.setSize(start + size); // throws past the area's end
+    } catch (const Xbyak::Error&) {
+        gen.setSize(old_size);
+        return nullptr;
+    }
+    return const_cast<u8*>(gen.getCode()) + start;
+}
+
 void RegisterPatchModule(void* module_ptr, u64 module_size, void* trampoline_area_ptr,
                          u64 trampoline_area_size) {
     std::call_once(init_flag, PatchesInit);

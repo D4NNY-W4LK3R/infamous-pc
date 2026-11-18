@@ -75,6 +75,8 @@ public:
 
     /// Number of workers that suits this machine: the rest of the cores stay with the game.
     static u32 DefaultNumWorkers();
+    /// The built-in worker count for this CPU, ignoring SS_PIPELINE_WORKERS.
+    static u32 BuiltinNumWorkers();
 
     /// Returns true when called from one of the compiler worker threads.
     static bool IsCompilerThread() noexcept;

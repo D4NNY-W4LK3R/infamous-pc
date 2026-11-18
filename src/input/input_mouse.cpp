@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <cmath>
+#include <cstdlib>
 
 #include "common/assert.h"
 #include "common/types.h"
+#include "core/mouse_aim.h"
 #include "input/controller.h"
 #include "input/input_handler.h"
 #include "input_mouse.h"
@@ -24,6 +26,7 @@ float mouse_deadzone_offset = 0.5, mouse_speed = 1, mouse_speed_offset = 0.1250;
 bool mouse_gyro_roll_mode = false;
 Uint32 mouse_polling_id = 0;
 MouseMode mouse_mode = MouseMode::Off;
+bool g_mouse_aim_clicks = false;
 
 // Switches mouse to a set mode or turns mouse emulation off if it was already in that mode.
 // Returns whether the mode is turned on.
@@ -34,6 +37,23 @@ bool ToggleMouseModeTo(MouseMode m) {
         mouse_mode = m;
     }
     return mouse_mode == m;
+}
+
+MouseMode GetMouseMode() {
+    return mouse_mode;
+}
+
+bool IsMouseJoystickMode() {
+    return mouse_mode == MouseMode::Joystick;
+}
+
+bool IsMouseGyroMode() {
+    return mouse_mode == MouseMode::Gyro;
+}
+
+bool MouseAimActive() {
+    return Core::MouseAim::Installed() && mouse_mode == MouseMode::Joystick &&
+           mouse_joystick_binding != 1;
 }
 
 void SetMouseToJoystick(int joystick) {
@@ -51,6 +71,13 @@ void SetMouseGyroRollMode(bool mode) {
 }
 
 void EmulateJoystick(GameController* controller, u32 interval) {
+    if (MouseAimActive()) {
+        // Native mouse camera: the mouse turns the camera itself (sdl_window.cpp); drain SDL's
+        // relative motion so another mouse mode does not start with one big jump.
+        float dx = 0, dy = 0;
+        SDL_GetRelativeMouseState(&dx, &dy);
+        return;
+    }
 
     Axis axis_x, axis_y;
     switch (mouse_joystick_binding) {
@@ -106,7 +133,31 @@ void EmulateTouchpad(GameController* controller, u32 interval) {
                        (mouse_buttons & SDL_BUTTON_RMASK) != 0);
 }
 
+static bool TouchpadBlockFix() {
+    static const bool block_fix = [] {
+        const char* v = std::getenv("SHADPS4_TOUCHPAD_BLOCK_FIX");
+        return v && v[0] == '1';
+    }();
+    return block_fix;
+}
+
+bool MouseEventsBelongToPad() {
+    // A click meant for the pad can land on an overlay window (the FPS counter) and start an
+    // ImGui window drag that swallows the keyboard while the button is held.
+    return TouchpadBlockFix() && mouse_mode != MouseMode::Off;
+}
+
 void ApplyMouseInputBlockers() {
+    if (g_mouse_aim_clicks && mouse_mode == MouseMode::Off) {
+        // Native mouse camera: the click bindings count only while the mouse is captured.
+        for (auto& k : pressed_keys) {
+            if (k.first.input.type == InputType::KeyboardMouse &&
+                (k.first.input.sdl_id == SDL_BUTTON_LEFT ||
+                 k.first.input.sdl_id == SDL_BUTTON_RIGHT)) {
+                k.second = true;
+            }
+        }
+    }
     switch (mouse_mode) {
     case MouseMode::Touchpad:
         for (auto& k : pressed_keys) {
@@ -123,6 +174,7 @@ void ApplyMouseInputBlockers() {
 
 Uint32 MousePolling(void* param, Uint32 id, Uint32 interval) {
     auto* controller = (GameController*)param;
+    Core::MouseAim::Tick();
     static bool was_gyro = false;
     if (was_gyro && mouse_mode != MouseMode::Gyro) {
         // Otherwise the last mouse movement keeps turning the controller after gyro mode is off

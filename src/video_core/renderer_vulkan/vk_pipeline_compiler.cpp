@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <cstdlib>
 #include <thread>
 
 #include "common/thread.h"
@@ -95,6 +96,24 @@ bool PipelineCompiler::IsCompilerThread() noexcept {
 }
 
 u32 PipelineCompiler::DefaultNumWorkers() {
+    // SS_PIPELINE_WORKERS: set by the Second Son Adaptive Shader & Pipeline mini-brain for a
+    // calibration launch or a measured winner, or by the user. Read once, at startup.
+    const u32 builtin = BuiltinNumWorkers();
+    const u32 num_threads = std::max(std::thread::hardware_concurrency(), 2U);
+    // (No logging here: this file is also built into the stand-alone pipeline compiler test.
+    // The value in effect is in the optimizer's session report.)
+    u64 chosen = builtin;
+    if (const char* text = std::getenv("SS_PIPELINE_WORKERS")) {
+        char* end = nullptr;
+        const unsigned long long parsed = std::strtoull(text, &end, 10);
+        if (end != text && *end == '\0' && parsed > 0) {
+            chosen = parsed;
+        }
+    }
+    return static_cast<u32>(std::clamp<u64>(chosen, 1, std::max(num_threads - 1, 1U)));
+}
+
+u32 PipelineCompiler::BuiltinNumWorkers() {
     const u32 num_threads = std::max(std::thread::hardware_concurrency(), 2U);
     // inFAMOUS Second Son cutscenes (e.g. the car-lift) bring dozens of new compute shaders at
     // once at 60-190 ms each. Leave 4 threads for the game/GPU/recorder, use the rest up to 12

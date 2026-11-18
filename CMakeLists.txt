@@ -957,6 +957,8 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/debugger.cpp
          src/core/debugger.h
          src/core/linker.cpp
+         src/core/mouse_aim.cpp
+         src/core/mouse_aim.h
          src/core/linker.h
          src/core/memory.cpp
          src/core/memory.h
@@ -1252,6 +1254,38 @@ set(INPUT src/input/controller.cpp
           src/input/input_handler.h
           src/input/input_mouse.cpp
           src/input/input_mouse.h
+          src/input/camera_hook_signature.cpp
+          src/input/camera_hook_signature.h
+)
+
+# Second Son Adaptive optimization system (Architecture v1.0). The core (everything but the glue
+# and the overlay) depends only on the standard library; tests/adaptive builds it on its own.
+set(ADAPTIVE src/adaptive/adaptive_overlay.cpp
+             src/adaptive/brain.cpp
+             src/adaptive/brain.h
+             src/adaptive/contracts.cpp
+             src/adaptive/contracts.h
+             src/adaptive/emulator_glue.cpp
+             src/adaptive/emulator_glue.h
+             src/adaptive/glue_internal.h
+             src/adaptive/hardware.cpp
+             src/adaptive/hardware.h
+             src/adaptive/knobs.cpp
+             src/adaptive/knobs.h
+             src/adaptive/knowledge.cpp
+             src/adaptive/knowledge.h
+             src/adaptive/mini_brains.cpp
+             src/adaptive/mini_brains.h
+             src/adaptive/safety.cpp
+             src/adaptive/safety.h
+             src/adaptive/settings.cpp
+             src/adaptive/settings.h
+             src/adaptive/stats.cpp
+             src/adaptive/stats.h
+             src/adaptive/telemetry.cpp
+             src/adaptive/telemetry.h
+             src/imgui/notice_layer.cpp
+             src/imgui/notice_layer.h
 )
 
 set(EMULATOR src/emulator.cpp
@@ -1293,6 +1327,7 @@ add_executable(shadps4
     ${AUDIO_CORE}
     ${IMGUI}
     ${INPUT}
+    ${ADAPTIVE}
     ${COMMON}
     ${CORE}
     ${SHADER_RECOMPILER}

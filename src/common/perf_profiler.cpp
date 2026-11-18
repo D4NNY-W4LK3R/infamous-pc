@@ -12,6 +12,7 @@
 
 #include <fmt/format.h>
 
+#include "adaptive/emulator_glue.h"
 #include "common/logging/log.h"
 #include "common/perf_profiler.h"
 #include "common/thread.h"
@@ -278,6 +279,20 @@ void OnFlip() {
     const double frame_ms = Milliseconds(now - state.last_flip).count();
     state.last_flip = now;
     const Totals frame = TakeCounters();
+    if (Adaptive::Glue::Active()) {
+        // Second Son Adaptive telemetry: one lock-free push per frame (adaptive/telemetry.h).
+        static_assert(NumStalls == static_cast<size_t>(Stall::Count));
+        std::array<double, NumStalls> stall_ms{};
+        for (size_t i = 0; i < NumStalls; ++i) {
+            stall_ms[i] = static_cast<double>(frame.nanoseconds[i]) / 1'000'000.0;
+        }
+        Adaptive::Glue::OnFrame(frame_ms, stall_ms.data(), static_cast<u32>(NumStalls),
+                                static_cast<u32>(frame.Events(Counter::Draws)),
+                                static_cast<u32>(frame.Events(Counter::Dispatches)),
+                                static_cast<u32>(frame.Events(Counter::Submits)),
+                                static_cast<u32>(frame.Events(Counter::BufferUploads)),
+                                static_cast<double>(frame.Events(Counter::GpuBusyNs)) / 1e6);
+    }
 
     const bool is_spike =
         frame_ms >= AlwaysLogMs || (state.usual_frame_ms > 0.0 && frame_ms >= MinSpikeMs &&

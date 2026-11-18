@@ -10,6 +10,7 @@
 #include <cmrc/cmrc.hpp>
 #include <stb_image.h>
 
+#include "adaptive/emulator_glue.h"
 #include "common/assert.h"
 #include "common/elf_info.h"
 #include "common/io_file.h"
@@ -21,8 +22,10 @@
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/pad/pad.h"
 #include "core/libraries/system/userservice.h"
+#include "core/mouse_aim.h"
 #include "core/user_settings.h"
 #include "imgui/friends_layer.h"
+#include "imgui/notice_layer.h"
 #include "imgui/renderer/imgui_core.h"
 #include "input/controller.h"
 #include "input/input_handler.h"
@@ -233,9 +236,51 @@ void WindowSDL::WaitEvent() {
         return;
     }
 
-    if (ImGui::Core::ProcessEvent(&event)) {
+    switch (event.type) {
+    case SDL_EVENT_KEY_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_MOTION:
+    case SDL_EVENT_MOUSE_WHEEL:
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+    case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+        Adaptive::Glue::NoteInput(); // calibration only measures idle seconds
+        break;
+    default:
+        break;
+    }
+
+    // SHADPS4_TOUCHPAD_BLOCK_FIX=1: while the mouse drives the pad, overlay windows never see its
+    // presses / motion, so a touch can't start a window drag that swallows the keyboard.
+    const bool mouse_to_pad =
+        Input::MouseEventsBelongToPad() &&
+        (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_MOTION ||
+         event.type == SDL_EVENT_MOUSE_WHEEL);
+    if (!mouse_to_pad && ImGui::Core::ProcessEvent(&event)) {
         return;
     }
+
+    const auto emu_key = [&event](Input::EmuKey k) {
+        const u32 key = Input::GetEmuKey(k);
+        return key != 0 && event.key.key == key;
+    };
+
+    // Touchpad / motion modes hand the mouse back to the camera when they are toggled off, if it
+    // had it before (finger scanners, the D.U.P. core lifts, the spray can).
+    const auto ToggleSpecialMouseMode = [this](Input::MouseMode m) {
+        static Input::MouseMode before = Input::MouseMode::Off;
+        const Input::MouseMode prev = Input::GetMouseMode();
+        if (Input::ToggleMouseModeTo(m)) {
+            if (prev == Input::MouseMode::Joystick) {
+                before = prev;
+            }
+        } else if (before == Input::MouseMode::Joystick) {
+            Input::ToggleMouseModeTo(Input::MouseMode::Joystick);
+            before = Input::MouseMode::Off;
+        }
+        const Input::MouseMode now = Input::GetMouseMode();
+        SDL_SetWindowRelativeMouseMode(this->GetSDLWindow(), now == Input::MouseMode::Joystick ||
+                                                                 now == Input::MouseMode::Gyro);
+    };
 
     switch (event.type) {
     case SDL_EVENT_WINDOW_RESIZED:
@@ -250,12 +295,27 @@ void WindowSDL::WaitEvent() {
         is_shown = event.type == SDL_EVENT_WINDOW_EXPOSED;
         OnResize();
         break;
+    case SDL_EVENT_MOUSE_MOTION:
+        if (Input::MouseAimActive()) {
+            // Native mouse camera: every pixel goes straight to the camera's pan / tilt.
+            Core::MouseAim::OnMouseMotion(event.motion.xrel, event.motion.yrel);
+        }
+        break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
     case SDL_EVENT_MOUSE_BUTTON_UP:
     case SDL_EVENT_MOUSE_WHEEL:
     case SDL_EVENT_MOUSE_WHEEL_OFF:
+        OnKeyboardMouseInput(&event);
+        break;
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP:
+        if (Input::MouseAimActive() && event.type == SDL_EVENT_KEY_DOWN &&
+            (emu_key(Input::EmuKey::MouseAimSlower) || emu_key(Input::EmuKey::MouseAimFaster))) {
+            // - / = : mouse-look speed down / up, remembered in user/mouse-aim.ini.
+            const float sens = Core::MouseAim::ScaleSensitivity(
+                emu_key(Input::EmuKey::MouseAimSlower) ? 0.8f : 1.25f);
+            Overlay::Notice::Show(fmt::format("Mouse look: {:.1f} degrees per 100 px", sens));
+        }
         OnKeyboardMouseInput(&event);
         break;
     case SDL_EVENT_GAMEPAD_ADDED:
@@ -309,15 +369,30 @@ void WindowSDL::WaitEvent() {
     case SDL_EVENT_MOUSE_TO_JOYSTICK:
         SDL_SetWindowRelativeMouseMode(this->GetSDLWindow(),
                                        Input::ToggleMouseModeTo(Input::MouseMode::Joystick));
+        if (Core::MouseAim::Installed()) {
+            Overlay::Notice::Show(Input::MouseAimActive() ? "Mouse look ON (- / = speed)"
+                                                          : "Mouse look off");
+        } else if (Core::MouseAim::Enabled()) {
+            Overlay::Notice::Show(Input::IsMouseJoystickMode()
+                                      ? "Mouse drives the right stick (camera hook not available "
+                                        "for this game build)"
+                                      : "Mouse released");
+        }
         break;
     case SDL_EVENT_MOUSE_TO_GYRO:
-        SDL_SetWindowRelativeMouseMode(this->GetSDLWindow(),
-                                       Input::ToggleMouseModeTo(Input::MouseMode::Gyro));
+        ToggleSpecialMouseMode(Input::MouseMode::Gyro);
         break;
     case SDL_EVENT_MOUSE_TO_TOUCHPAD:
-        SDL_SetWindowRelativeMouseMode(this->GetSDLWindow(),
-                                       Input::ToggleMouseModeTo(Input::MouseMode::Touchpad));
-        SDL_SetWindowRelativeMouseMode(this->GetSDLWindow(), false);
+        ToggleSpecialMouseMode(Input::MouseMode::Touchpad);
+        if (Input::GetMouseMode() == Input::MouseMode::Touchpad) {
+            SDL_SetWindowRelativeMouseMode(this->GetSDLWindow(), false);
+            Overlay::Notice::Show("Mouse = touchpad (Delete again to go back)");
+        } else if (Input::MouseAimActive()) {
+            Overlay::Notice::Show("Mouse look ON");
+        }
+        break;
+    case SDL_EVENT_TOGGLE_ADAPTIVE_OVERLAY:
+        Adaptive::Glue::ToggleOverlay();
         break;
     case SDL_EVENT_ADD_VIRTUAL_USER:
         for (int i = 0; i < 4; i++) {
@@ -364,6 +439,12 @@ void WindowSDL::InitTimers() {
         SDL_AddTimer(4, &PollController, controllers[i]);
     }
     SDL_AddTimer(33, Input::MousePolling, (void*)controllers[0]);
+    if (Core::MouseAim::Enabled()) {
+        // Native mouse camera: the mouse is captured from the start (F7 toggles). If the camera
+        // hook was refused for this game build, it drives the right stick instead.
+        Input::ToggleMouseModeTo(Input::MouseMode::Joystick);
+        SDL_SetWindowRelativeMouseMode(window, true);
+    }
 }
 
 void WindowSDL::RequestKeyboard() {

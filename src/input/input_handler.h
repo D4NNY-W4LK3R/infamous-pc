@@ -57,6 +57,7 @@
 #define SDL_EVENT_RDOC_CAPTURE SDL_EVENT_USER + 13
 #define SDL_EVENT_SCREENSHOT_WITH_OVERLAYS SDL_EVENT_USER + 14
 #define SDL_EVENT_TOGGLE_FRIENDS SDL_EVENT_USER + 15
+#define SDL_EVENT_TOGGLE_ADAPTIVE_OVERLAY SDL_EVENT_USER + 16
 
 #define LEFTJOYSTICK_HALFMODE 0x00010000
 #define RIGHTJOYSTICK_HALFMODE 0x00020000
@@ -84,6 +85,7 @@
 #define HOTKEY_SCREENSHOT_WITH_OVERLAYS 0xf000000e
 #define HOTKEY_OPEN_EMULATOR_SETTINGS 0xf000000f
 #define HOTKEY_TOGGLE_FRIENDS 0xf0000010
+#define HOTKEY_ADAPTIVE_OVERLAY 0xf0000011
 
 #define SDL_UNMAPPED UINT32_MAX - 1
 
@@ -205,6 +207,7 @@ const std::map<std::string, u32> string_to_hotkey_map = {
     {"hotkey_volume_down", HOTKEY_VOLUME_DOWN},
     {"hotkey_emulator_settings", HOTKEY_OPEN_EMULATOR_SETTINGS},
     {"hotkey_toggle_friends", HOTKEY_TOGGLE_FRIENDS},
+    {"hotkey_adaptive_overlay", HOTKEY_ADAPTIVE_OVERLAY},
 };
 
 const std::map<std::string, AxisMapping> string_to_axis_map = {
@@ -378,6 +381,16 @@ const std::map<std::string, u32> string_to_keyboard_key_map = {
     // no binding
     {"unmapped", SDL_UNMAPPED},
 };
+
+// The emulator's own single-key actions that are not pad outputs, bindable in global.ini
+// (hotkey_mouse_aim_slower = minus, ...; "none" turns one off). Read by sdl_window.cpp.
+enum class EmuKey : u8 {
+    MouseAimSlower,
+    MouseAimFaster,
+    Count,
+};
+/// The SDL keycode bound to an emulator key; 0 = none.
+u32 GetEmuKey(EmuKey key);
 
 void ParseInputConfig(const std::string game_id);
 

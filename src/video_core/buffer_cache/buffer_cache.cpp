@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <magic_enum/magic_enum.hpp>
 
+#include "adaptive/emulator_glue.h"
 #include "common/alignment.h"
 #include "common/perf_profiler.h"
 #include "common/polyfill_thread.h"
@@ -87,8 +88,12 @@ static bool UploadWorkerEnabled() {
 
 /// The worker is woken once this many jobs are queued (each wake is a system call for the
 /// command processor); otherwise it looks for jobs every millisecond, and a submission
-/// waiting for jobs does them itself.
-static constexpr size_t UploadWorkerWakeJobs = 8;
+/// waiting for jobs does them itself. Built-in 8; the Second Son Adaptive Transfer & Sync
+/// mini-brain may adjust it live (Adaptive::Glue::g_upload_wake_jobs, 1..64).
+static size_t UploadWorkerWakeJobs() {
+    return static_cast<size_t>(std::clamp<s32>(
+        Adaptive::Glue::g_upload_wake_jobs.load(std::memory_order_relaxed), 1, 64));
+}
 
 
 BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
@@ -230,7 +235,7 @@ void BufferCache::UploadWorker::Enqueue(Job&& job) {
     {
         std::scoped_lock lock{queue_mutex};
         queue.push_back(std::move(job));
-        wake = queue.size() >= UploadWorkerWakeJobs;
+        wake = queue.size() >= UploadWorkerWakeJobs();
     }
     if (wake) {
         queue_cv.notify_one();

@@ -3,6 +3,7 @@
 
 #include <numeric>
 
+#include "adaptive/emulator_glue.h"
 #include "common/alignment.h"
 #include "common/assert.h"
 #include "video_core/buffer_cache/buffer.h"
@@ -108,6 +109,7 @@ void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type,
                         "Allocating a buffer of {} bytes went over the memory "
                         "budget, allocating it past the budget",
                         buffer_ci.size);
+            Adaptive::Glue::g_over_budget_allocations.fetch_add(1, std::memory_order_relaxed);
             VmaAllocationCreateInfo over_budget_ci = alloc_ci;
             over_budget_ci.flags &= ~VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT;
             result = vmaCreateBuffer(allocator, &buffer_ci_unsafe, &over_budget_ci, &unsafe_buffer,

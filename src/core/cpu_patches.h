@@ -72,6 +72,10 @@ struct RedZonePatchResult {
     }
 };
 
+/// Reserves `size` bytes (64-byte aligned) of executable trampoline space within jump range of
+/// the module containing module_address; nullptr if there is none left.
+u8* AllocateTrampolineSpace(const void* module_address, u64 size);
+
 /// Registers a module for patching, providing an area to generate trampoline code.
 void RegisterPatchModule(void* module_ptr, u64 module_size, void* trampoline_area_ptr,
                          u64 trampoline_area_size);

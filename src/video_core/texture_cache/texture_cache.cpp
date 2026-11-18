@@ -18,6 +18,7 @@
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/host_compatibility.h"
+#include "adaptive/emulator_glue.h"
 #include "video_core/texture_cache/texture_cache.h"
 #include "video_core/texture_cache/tile_manager.h"
 
@@ -88,6 +89,10 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
             std::max(trigger_gc_memory,
                      std::min(static_cast<u64>(device_local_memory) / 2, pressure_gc_memory));
     }
+    // Second Son Adaptive: the GPU Memory authority reads VRAM use / budget about once a second
+    // from its own thread (vkGetPhysicalDeviceMemoryProperties2 needs no synchronization).
+    Adaptive::Glue::SetVramSampler([this] { return instance.GetDeviceMemoryUsage(); },
+                                   [this] { return instance.GetDeviceMemoryBudget(); });
     LOG_INFO(Render_Vulkan,
              "Texture cache: memory budget {} MB, cleanup from {} MB, pressured from {} MB, "
              "critical from {} MB",
@@ -1016,7 +1021,15 @@ void TextureCache::GarbageCollectImages() {
         total_used_memory = instance.GetDeviceMemoryUsage();
     }
     CollectImagesForSlots();
-    if (total_used_memory < trigger_gc_memory) {
+    // Second Son Adaptive (Texture & Cache mini-brain): extra headroom makes the collector start
+    // earlier at every threshold, as if this much more memory were in use. 0 = built-in behaviour.
+    // The collector's own rules (age, GPU completion, downloads) decide what may go.
+    const u64 headroom = static_cast<u64>(std::max<s32>(
+                             Adaptive::Glue::g_texture_gc_headroom_mb.load(std::memory_order_relaxed),
+                             0))
+                         << 20;
+    const auto used = [&] { return total_used_memory + headroom; };
+    if (used() < trigger_gc_memory) {
         return;
     }
     bool pressured = false;
@@ -1025,8 +1038,8 @@ void TextureCache::GarbageCollectImages() {
     size_t num_deletions = 0;
 
     const auto configure = [&](bool allow_aggressive) {
-        pressured = total_used_memory >= pressure_gc_memory;
-        aggresive = allow_aggressive && total_used_memory >= critical_gc_memory;
+        pressured = used() >= pressure_gc_memory;
+        aggresive = allow_aggressive && used() >= critical_gc_memory;
         // Ticks advance once per guest submission, about once a frame. With memory to spare,
         // only textures unused for a long while go, so ones that just left the view stay.
         if (relaxed_gc) {
@@ -1057,13 +1070,13 @@ void TextureCache::GarbageCollectImages() {
             DownloadImageMemory(image_id);
         }
         FreeImage(image_id);
-        if (total_used_memory < critical_gc_memory) {
+        if (used() < critical_gc_memory) {
             if (aggresive) {
                 num_deletions >>= 2;
                 aggresive = false;
                 return false;
             }
-            if (pressured && total_used_memory < pressure_gc_memory) {
+            if (pressured && used() < pressure_gc_memory) {
                 num_deletions >>= 1;
                 pressured = false;
             }
@@ -1075,7 +1088,7 @@ void TextureCache::GarbageCollectImages() {
     configure(false);
     image_lru_cache.ForEachItemBelow(gc_tick - ticks_to_destroy, clean_up);
 
-    if (total_used_memory >= critical_gc_memory) {
+    if (used() >= critical_gc_memory) {
         // If we are still over the critical limit, run an aggressive GC
         configure(true);
         image_lru_cache.ForEachItemBelow(gc_tick - ticks_to_destroy, clean_up);

@@ -4,6 +4,8 @@
 #include "input_handler.h"
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -29,6 +31,7 @@
 #include "core/emulator_state.h"
 #include "imgui/big_picture/settings_dialog_layer.h"
 #include "input/controller.h"
+#include "core/mouse_aim.h"
 #include "input/input_mouse.h"
 
 namespace Input {
@@ -128,6 +131,125 @@ analog_deadzone = rightjoystick, 5, 127
 override_controller_color = false, 0, 0, 255
 )";
 }
+// inFAMOUS Second Son: a PC-style keyboard and mouse layout, written as the game's input config
+// the first time the game starts (an existing config is never touched). The mouse turns the
+// camera (native mouse camera, F7 toggles); R2 / L2 (shoot / aim) are added on the left / right
+// mouse button by ParseInputConfig. G / H / T stay the motion-sensor keys of global.ini.
+constexpr std::string_view GetSecondSonInputConfig() {
+    return R"(# inFAMOUS Second Son - PC keyboard and mouse layout (Second Son Adaptive build)
+# Mouse: look around (F7 = capture the mouse on / off), left button = shoot (R2),
+#        right button = aim (L2). - / = = mouse speed. Delete = mouse as touchpad.
+# Motion sensor (global.ini): G / H = tilt left / right, T = shake.
+
+axis_left_x_minus = a
+axis_left_x_plus = d
+axis_left_y_minus = w
+axis_left_y_plus = s
+
+cross = space
+circle = lshift
+square = c
+triangle = f
+l1 = q
+r1 = e
+l3 = u
+r3 = o
+
+touchpad_left = r
+touchpad_right = y
+touchpad_center = tab
+options = enter
+options = escape
+
+pad_up = up
+pad_down = down
+pad_left = left
+pad_right = right
+
+# Camera on the keyboard too (laptops without a mouse)
+axis_right_x_minus = j
+axis_right_x_plus = l
+axis_right_y_minus = i
+axis_right_y_plus = k
+
+# Spare face buttons on the keypad
+triangle = kp8
+circle = kp6
+cross = kp2
+square = kp4
+
+# Controller bindings
+triangle = triangle
+cross = cross
+square = square
+circle = circle
+l1 = l1
+l2 = l2
+l3 = l3
+r1 = r1
+r2 = r2
+r3 = r3
+options = options
+touchpad_center = back
+pad_up = pad_up
+pad_down = pad_down
+pad_left = pad_left
+pad_right = pad_right
+axis_left_x = axis_left_x
+axis_left_y = axis_left_y
+axis_right_x = axis_right_x
+axis_right_y = axis_right_y
+
+analog_deadzone = leftjoystick, 5, 127
+analog_deadzone = rightjoystick, 5, 127
+
+override_controller_color = false, 0, 0, 255
+)";
+}
+
+bool IsSecondSonSerial(const std::string& id) {
+    return id == "CUSA00223" || id == "CUSA00004";
+}
+
+namespace {
+struct EmuKeyName {
+    const char* name;
+    u32 default_key;
+};
+constexpr std::array<EmuKeyName, static_cast<size_t>(EmuKey::Count)> emu_key_names{{
+    {"hotkey_mouse_aim_slower", SDLK_MINUS},
+    {"hotkey_mouse_aim_faster", SDLK_EQUALS},
+}};
+constexpr u32 EmuKeyNone = ~0u; // "none" in the config; 0 = the default key
+std::array<std::atomic<u32>, static_cast<size_t>(EmuKey::Count)> emu_keys{};
+
+/// A hotkey_* line naming one of the emulator's own keys (true = handled).
+bool ParseEmuKeyLine(const std::string& output, const std::string& input) {
+    for (size_t i = 0; i < emu_key_names.size(); ++i) {
+        if (output != emu_key_names[i].name) {
+            continue;
+        }
+        if (input == "none") {
+            emu_keys[i].store(EmuKeyNone, std::memory_order_relaxed);
+        } else if (const auto it = string_to_keyboard_key_map.find(input);
+                   it != string_to_keyboard_key_map.end()) {
+            emu_keys[i].store(it->second, std::memory_order_relaxed);
+        } else {
+            LOG_WARNING(Input, "{}: \"{}\" is not a single keyboard key; kept the default",
+                        output, input);
+        }
+        return true;
+    }
+    return false;
+}
+} // namespace
+
+u32 GetEmuKey(EmuKey key) {
+    const size_t i = static_cast<size_t>(key);
+    const u32 k = emu_keys[i].load(std::memory_order_relaxed);
+    return k == 0 ? emu_key_names[i].default_key : k == EmuKeyNone ? 0 : k;
+}
+
 std::filesystem::path GetInputConfigFile(const std::string& game_id) {
     // Read configuration file of the game, and if it doesn't exist, generate it from default
     // If that doesn't exist either, generate that from getDefaultConfig() and try again
@@ -185,6 +307,9 @@ std::filesystem::path GetInputConfigFile(const std::string& game_id) {
             {"hotkey_volume_down", "kpminus"},
             {"hotkey_emulator_settings", "f3"},
             {"hotkey_toggle_friends", "f2"},
+            {"hotkey_adaptive_overlay", "f1"},
+            {"hotkey_mouse_aim_slower", "minus"},
+            {"hotkey_mouse_aim_faster", "equals"},
             {"motion_tilt_left", "g"},
             {"motion_tilt_right", "h"},
             {"motion_shake", "t"},
@@ -221,9 +346,17 @@ std::filesystem::path GetInputConfigFile(const std::string& game_id) {
         }
     }
 
-    // If game-specific config doesn't exist, create it from the default config
+    // If game-specific config doesn't exist, create it from the default config - for inFAMOUS
+    // Second Son, from its PC keyboard and mouse layout.
     if (!std::filesystem::exists(config_file)) {
-        std::filesystem::copy(default_config_file, config_file);
+        if (IsSecondSonSerial(game_id)) {
+            std::ofstream out(config_file);
+            out << GetSecondSonInputConfig();
+            LOG_INFO(Input, "Wrote the Second Son keyboard and mouse layout to {}",
+                     config_file.string());
+        } else {
+            std::filesystem::copy(default_config_file, config_file);
+        }
     }
     return config_file;
 }
@@ -396,6 +529,9 @@ void ParseInputConfig(const std::string game_id = "") {
     lefttrigger_deadzone = default_deadzone;
     righttrigger_deadzone = default_deadzone;
 
+    for (auto& k : emu_keys) {
+        k.store(0, std::memory_order_relaxed); // a reload without the line returns to the default
+    }
     int lineCount = 0;
 
     std::ifstream config_stream(config_file);
@@ -431,6 +567,9 @@ void ParseInputConfig(const std::string game_id = "") {
 
         std::string output_string = line.substr(0, equal_pos);
         std::string input_string = line.substr(equal_pos + 1);
+        if (ParseEmuKeyLine(output_string, input_string)) {
+            return;
+        }
         s8 input_gamepad_id = -1, output_gamepad_id = -1; // -1 means it's not specified
 
         // input gamepad id is only for controllers, it's discarded otherwise
@@ -628,6 +767,29 @@ void ParseInputConfig(const std::string game_id = "") {
         ProcessLine();
     }
     config_stream.close();
+    // Native mouse camera: R2 = left click (shoot), L2 = right click (aim), added beside the keys
+    // unless the config already uses those buttons; they count only while the mouse is captured
+    // (input_mouse.cpp ApplyMouseInputBlockers). Added whether or not the camera hook installed,
+    // so shooting also works with the mouse-to-stick fallback.
+    g_mouse_aim_clicks = false;
+    if (Core::MouseAim::Enabled()) {
+        const bool config_uses_buttons =
+            std::ranges::any_of(connections, [](const BindingConnection& c) {
+                return std::ranges::any_of(c.binding.keys, [](const InputID& k) {
+                    return k.type == InputType::KeyboardMouse &&
+                           (k.sdl_id == SDL_BUTTON_LEFT || k.sdl_id == SDL_BUTTON_RIGHT);
+                });
+            });
+        if (!config_uses_buttons) {
+            line = "r2 = leftbutton";
+            ProcessLine();
+            line = "l2 = rightbutton";
+            ProcessLine();
+            g_mouse_aim_clicks = true;
+        }
+        LOG_INFO(Input, "Mouse buttons: R2 / L2 on the left / right button {}",
+                 config_uses_buttons ? "skipped (the config binds the mouse buttons)" : "added");
+    }
     std::sort(connections.begin(), connections.end());
     for (auto& c : connections) {
         LOG_DEBUG(Input, "Binding: {} : {}", c.output->ToString(), c.binding.ToString());
@@ -895,6 +1057,11 @@ void ControllerOutput::FinalizeUpdate(u8 gamepad_index) {
         case HOTKEY_OPEN_EMULATOR_SETTINGS:
             if (new_button_state) {
                 ImGuiEmuSettings::OpenInGameSettingsDialog();
+            }
+            break;
+        case HOTKEY_ADAPTIVE_OVERLAY:
+            if (new_button_state) {
+                PushSDLEvent(SDL_EVENT_TOGGLE_ADAPTIVE_OVERLAY);
             }
             break;
         case HOTKEY_TOGGLE_FRIENDS:

@@ -12,6 +12,7 @@
 #include <fmt/xchar.h>
 #include <hwinfo/hwinfo.h>
 
+#include "adaptive/emulator_glue.h"
 #include "common/debug.h"
 #include "common/logging/log.h"
 #include "common/string_util.h"
@@ -89,6 +90,8 @@ void Emulator::Shutdown() {
     if (exit_done) {
         return;
     }
+    // Second Son Adaptive: judge this launch, save what was learned, write the session report.
+    Adaptive::Glue::Shutdown();
     Common::Log::Flush();
     Libraries::SaveData::Backup::StopThread();
     Storage::DataBase::Instance().Close();
@@ -531,6 +534,10 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
         LOG_INFO(Loader, "PSVR Supported: {}", (bool)psf_attributes.support_ps_vr.Value());
         LOG_INFO(Loader, "PSVR Required: {}", (bool)psf_attributes.require_ps_vr.Value());
     }
+    // Second Son Adaptive: hardware discovery, learned values and this launch's start-up values
+    // (set in the environment before any renderer code reads them).
+    Adaptive::Glue::Startup(id, app_version, game_folder / "eboot.bin");
+
     if (!args.empty()) {
         const auto argc = std::min<size_t>(args.size(), 32);
         for (auto i = 0; i < argc; i++) {

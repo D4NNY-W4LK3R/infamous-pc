@@ -1,0 +1,331 @@
+// SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+#include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <cstdlib>
+#include <fstream>
+#include <memory>
+#include <mutex>
+#include <thread>
+
+#include <hwinfo/hwinfo.h>
+
+#include "adaptive/brain.h"
+#include "adaptive/emulator_glue.h"
+#include "adaptive/glue_internal.h"
+#include "adaptive/settings.h"
+#include "common/logging/log.h"
+#include "common/path_util.h"
+#include "common/scm_rev.h"
+#include "common/thread.h"
+#include "video_core/renderer_vulkan/vk_pipeline_compiler.h"
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+namespace Adaptive::Glue {
+
+namespace {
+
+std::unique_ptr<CentralBrain> g_brain;
+std::filesystem::path g_dir;
+UserSettings g_settings;
+std::mutex g_vram_mutex;
+std::function<std::uint64_t()> g_vram_used;
+std::function<std::uint64_t()> g_vram_budget;
+HardwareInfo g_hardware;
+std::uint64_t g_frame_index = 0;
+
+std::optional<std::string> EnvGet(const std::string& name) {
+    if (const char* v = std::getenv(name.c_str())) {
+        return std::string(v);
+    }
+    return std::nullopt;
+}
+
+void EnvSet(const std::string& name, const std::string& value) {
+#ifdef _WIN32
+    _putenv_s(name.c_str(), value.c_str());
+#else
+    setenv(name.c_str(), value.c_str(), 0);
+#endif
+}
+
+std::uint32_t ParseHexId(const std::string& s) {
+    std::string t;
+    for (const char c : s) {
+        if (std::isxdigit(static_cast<unsigned char>(c))) {
+            t += c;
+        }
+    }
+    if (t.size() > 2 && (s.find("0x") != std::string::npos || s.find("0X") != std::string::npos)) {
+        t = t.substr(1); // drop the 0 of "0x"
+    }
+    return t.empty() ? 0u : static_cast<std::uint32_t>(std::strtoul(t.c_str(), nullptr, 16));
+}
+
+std::string EbootSignature(const std::filesystem::path& eboot) {
+    std::ifstream in(eboot, std::ios::binary);
+    if (!in) {
+        return "unknown";
+    }
+    std::uint64_t h = 0xcbf29ce484222325ull;
+    std::uint64_t total = 0;
+    std::vector<char> buf(1 << 20);
+    while (in) {
+        in.read(buf.data(), static_cast<std::streamsize>(buf.size()));
+        const auto n = static_cast<std::size_t>(in.gcount());
+        h = Fnv1a64(buf.data(), n, h);
+        total += n;
+    }
+    return Hex64(h) + "-" + std::to_string(total);
+}
+
+HardwareInfo Discover() {
+    HardwareInfo hw;
+    try {
+        const auto cpus = hwinfo::getAllCPUs();
+        if (!cpus.empty()) {
+            hw.cpu_model = cpus[0].modelName();
+            hw.cpu_physical_cores = static_cast<std::uint32_t>(cpus[0].numPhysicalCores());
+            hw.cpu_logical_cores = static_cast<std::uint32_t>(cpus[0].numLogicalCores());
+        }
+        hwinfo::Memory ram;
+        hw.ram_total_bytes = static_cast<std::uint64_t>(ram.total_Bytes());
+        hw.ram_available_bytes = static_cast<std::uint64_t>(ram.available_Bytes());
+        hwinfo::OS os;
+        hw.os_name = os.name() + " " + os.version();
+        // Prefer a discrete GPU: on Optimus laptops the renderer uses the NVIDIA one.
+        const auto gpus = hwinfo::getAllGPUs();
+        const hwinfo::GPU* pick = nullptr;
+        for (const auto& g : gpus) {
+            const std::uint32_t vendor = ParseHexId(g.vendor_id());
+            if (vendor == 0x10de || vendor == 0x1002) {
+                pick = &g;
+                break;
+            }
+        }
+        if (!pick && !gpus.empty()) {
+            pick = &gpus[0];
+        }
+        if (pick) {
+            hw.gpu.name = pick->name();
+            hw.gpu.vendor_id = ParseHexId(pick->vendor_id());
+            hw.gpu.device_id = ParseHexId(pick->device_id());
+            hw.gpu.driver_version = pick->driverVersion();
+        }
+    } catch (...) {
+        LOG_WARNING(Render, "Adaptive: hardware discovery failed partly; continuing with less");
+    }
+    if (hw.cpu_logical_cores == 0) {
+        hw.cpu_logical_cores = std::max(1u, std::thread::hardware_concurrency());
+    }
+#if defined(__x86_64__) || defined(_M_X64)
+    // AVX2 / SSE4a, the CPU features the emulator's patches care about.
+#ifdef _MSC_VER
+    int r[4];
+    __cpuid(r, 0);
+    if (r[0] >= 7) {
+        __cpuidex(r, 7, 0);
+        hw.cpu_avx2 = (r[1] & (1 << 5)) != 0;
+    }
+    __cpuid(r, 0x80000001);
+    hw.cpu_sse4a = (r[2] & (1 << 6)) != 0;
+#else
+    hw.cpu_avx2 = __builtin_cpu_supports("avx2");
+#endif
+#endif
+#ifdef _WIN32
+    SYSTEM_POWER_STATUS ps{};
+    if (GetSystemPowerStatus(&ps)) {
+        hw.on_battery = ps.ACLineStatus == 0;
+    }
+#endif
+    return hw;
+}
+
+} // namespace
+
+void Detail::PublishFrame(double frame_ms, const double* stall_ms, std::uint32_t num_stalls,
+                          std::uint32_t draws, std::uint32_t dispatches, std::uint32_t submits,
+                          std::uint32_t buffer_uploads, double gpu_busy_ms) {
+    FrameSample f;
+    f.frame_index = g_frame_index++;
+    f.timestamp_ns = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+    f.frame_ms = static_cast<float>(frame_ms);
+    const std::uint32_t n = std::min<std::uint32_t>(num_stalls, NumStallKinds);
+    for (std::uint32_t i = 0; i < n; ++i) {
+        f.stall_ms[i] = static_cast<float>(stall_ms[i]);
+    }
+    f.draws = draws;
+    f.dispatches = dispatches;
+    f.submits = submits;
+    f.buffer_uploads = buffer_uploads;
+    f.gpu_busy_ms = static_cast<float>(gpu_busy_ms);
+    g_brain->PublishFrame(f);
+}
+
+void Detail::NoteInputSlow() {
+    g_brain->NoteInput();
+}
+
+void Startup(const std::string& game_serial, const std::string& app_version,
+             const std::filesystem::path& eboot_host_path) {
+    if (g_brain) {
+        return;
+    }
+    g_dir = Common::FS::GetUserPath(Common::FS::PathType::UserDir) / "adaptive";
+    std::error_code ec;
+    std::filesystem::create_directories(g_dir, ec);
+    const auto settings_file = g_dir / "settings.ini";
+    const bool had_settings = std::filesystem::exists(settings_file, ec);
+    g_settings = LoadSettings(settings_file, EnvGet);
+    for (const auto& w : g_settings.warnings) {
+        LOG_WARNING(Render, "Adaptive settings: {}", w);
+    }
+    if (!had_settings) {
+        SaveSettings(settings_file, g_settings); // a commented file the user can edit
+    }
+    if (!g_settings.enabled) {
+        LOG_INFO(Render, "Adaptive optimizer: disabled (the emulator runs with its built-in "
+                         "values)");
+        return;
+    }
+
+    g_hardware = Discover();
+    SoftwareInfo sw;
+    sw.emulator_build = std::string(Common::g_version) + "-" + Common::g_scm_rev;
+    sw.game_serial = game_serial;
+    sw.game_version = app_version;
+    sw.eboot_signature = EbootSignature(eboot_host_path);
+
+    BrainConfig cfg;
+    cfg.mode = g_settings.mode;
+    cfg.data_dir = g_dir;
+    cfg.tick_ms = g_settings.tick_ms;
+    cfg.calibrate_on_battery = g_settings.calibrate_on_battery;
+    cfg.on_thread_start = [] {
+        Common::SetCurrentThreadName("shadPS4:AdaptiveBrain");
+        Common::SetCurrentThreadPriority(Common::ThreadPriority::Low);
+    };
+    g_brain = std::make_unique<CentralBrain>(cfg);
+
+    EmulatorDefaults d;
+    d.pipeline_workers = Vulkan::PipelineCompiler::BuiltinNumWorkers();
+    d.pipeline_workers_max =
+        std::clamp<std::int64_t>(static_cast<std::int64_t>(g_hardware.cpu_logical_cores) - 2,
+                                 d.pipeline_workers, 12);
+    d.upload_wake_jobs = 8;
+    bool ok = true;
+    ok &= g_brain->RegisterMiniBrain(MakeBufferGeometryBrain(d));
+    ok &= g_brain->RegisterMiniBrain(
+        MakeTextureCacheBrain(d, &g_brain->Memory()),
+        {{KnobId::TextureGcHeadroomMb, AtomicActuator(g_texture_gc_headroom_mb)}},
+        {{KnobId::TextureGcHeadroomMb, -1}});
+    ok &= g_brain->RegisterMiniBrain(
+        MakeTransferSyncBrain(d), {{KnobId::UploadWakeJobs, AtomicActuator(g_upload_wake_jobs)}});
+    ok &= g_brain->RegisterMiniBrain(MakeShaderPipelineBrain(d));
+    ok &= g_brain->RegisterMiniBrain(MakeFramePacingBrain(d));
+    ok &= g_brain->RegisterMiniBrain(MakeCpuWorkloadBrain(d));
+    if (!ok) {
+        LOG_ERROR(Render, "Adaptive: a mini-brain was refused; see the session report");
+    }
+    g_brain->SetResourceSampler([] {
+        ResourceSample r;
+        std::scoped_lock lk{g_vram_mutex};
+        if (g_vram_used) {
+            r.vram_used_bytes = g_vram_used();
+        }
+        if (g_vram_budget) {
+            r.vram_budget_bytes = g_vram_budget();
+        }
+        r.over_budget_allocations = g_over_budget_allocations.load(std::memory_order_relaxed);
+        return r;
+    });
+
+    const StartupResult res = g_brain->Startup(g_hardware, sw, EnvGet, EnvSet);
+    LOG_INFO(Render, "Adaptive optimizer: mode {}, knowledge {}, profile {}", ToString(cfg.mode),
+             ToString(res.load_status), MakeFingerprint(g_hardware, sw).ProfileKey());
+    LOG_INFO(Render, "Adaptive hardware: {} | {} threads | {} GB RAM | GPU {} (driver {}){}",
+             g_hardware.cpu_model, g_hardware.cpu_logical_cores,
+             g_hardware.ram_total_bytes >> 30, g_hardware.gpu.name,
+             g_hardware.gpu.driver_version, g_hardware.on_battery ? " | ON BATTERY" : "");
+    for (const auto& [k, v] : res.launch_values) {
+        LOG_INFO(Render, "Adaptive: start-up value {} = {} (learned or under test)", k, v);
+    }
+    for (const auto& n : res.notes) {
+        LOG_INFO(Render, "Adaptive: {}", n);
+    }
+    Detail::g_active.store(true, std::memory_order_release);
+    g_brain->Start();
+}
+
+void ReportVulkanDevice(const std::string& name, std::uint32_t vendor_id, std::uint32_t device_id,
+                        std::uint32_t driver_version, std::uint32_t api_version,
+                        std::uint64_t device_local_bytes, std::uint64_t budget_bytes,
+                        bool memory_budget_ext, bool integrated) {
+    LOG_INFO(Render, "Adaptive: renderer GPU {} {:04x}:{:04x}, Vulkan driver {}, {} MB local, "
+                     "budget {} MB{}",
+             name, vendor_id, device_id, DecodeDriverVersion(vendor_id, driver_version),
+             device_local_bytes >> 20, budget_bytes >> 20,
+             memory_budget_ext ? "" : " (no VK_EXT_memory_budget)");
+    if (!g_brain) {
+        return;
+    }
+    if (g_hardware.gpu.device_id != 0 &&
+        (g_hardware.gpu.device_id != device_id || g_hardware.gpu.vendor_id != vendor_id)) {
+        LOG_WARNING(Render,
+                    "Adaptive: the renderer uses {:04x}:{:04x}, but start-up discovery picked "
+                    "{:04x}:{:04x}; switching to Observe for this session so nothing learned on "
+                    "one GPU is applied to the other",
+                    vendor_id, device_id, g_hardware.gpu.vendor_id, g_hardware.gpu.device_id);
+        g_brain->RequestMode(Mode::Observe);
+    }
+    (void)api_version;
+    (void)integrated;
+}
+
+void SetVramSampler(std::function<std::uint64_t()> used, std::function<std::uint64_t()> budget) {
+    std::scoped_lock lk{g_vram_mutex};
+    g_vram_used = std::move(used);
+    g_vram_budget = std::move(budget);
+}
+
+void Shutdown() {
+    if (!g_brain) {
+        return;
+    }
+    Detail::g_active.store(false, std::memory_order_release);
+    const auto report = g_brain->Shutdown();
+    // Live knobs are back to their defaults; leave the atomics consistent for any late reader.
+    g_texture_gc_headroom_mb.store(0, std::memory_order_relaxed);
+    g_upload_wake_jobs.store(8, std::memory_order_relaxed);
+    LOG_INFO(Render, "Adaptive: session report written to {}", report.string());
+    {
+        std::scoped_lock lk{g_vram_mutex};
+        g_vram_used = {};
+        g_vram_budget = {};
+    }
+}
+
+// ---- Overlay plumbing used by adaptive_overlay.cpp ---------------------------------------------
+
+CentralBrain* BrainForOverlay() {
+    return g_brain.get();
+}
+
+UserSettings& SettingsForOverlay() {
+    return g_settings;
+}
+
+void SaveSettingsFromOverlay() {
+    SaveSettings(g_dir / "settings.ini", g_settings);
+}
+
+} // namespace Adaptive::Glue

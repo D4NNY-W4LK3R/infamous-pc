@@ -476,6 +476,8 @@ public:
 
     /// Returns the amount of memory used.
     [[nodiscard]] u64 GetDeviceMemoryUsage() const;
+    /// Current VK_EXT_memory_budget heap budget of the heaps in use (0 when not supported).
+    [[nodiscard]] u64 GetDeviceMemoryBudget() const;
 
     /// Returns the total memory budget available to the device.
     [[nodiscard]] u64 GetTotalMemoryBudget() const {

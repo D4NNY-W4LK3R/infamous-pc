@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <memory>
+#include "adaptive/emulator_glue.h"
 #include "common/assert.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -122,6 +123,7 @@ void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
         // See Buffer::Create: past the budget, the driver moves memory out instead of failing.
         LOG_WARNING(Render_Vulkan, "Allocating an image went over the memory budget, allocating "
                                    "it past the budget");
+        Adaptive::Glue::g_over_budget_allocations.fetch_add(1, std::memory_order_relaxed);
         VmaAllocationCreateInfo over_budget_ci = alloc_ci;
         over_budget_ci.flags &= ~VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT;
         result = vmaCreateImage(allocator, &image_ci_unsafe, &over_budget_ci, &unsafe_image,
