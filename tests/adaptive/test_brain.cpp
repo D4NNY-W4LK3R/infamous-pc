@@ -5,6 +5,7 @@
 // whose times depend on the knob values the brain sets, on a fake clock.
 
 #include <filesystem>
+#include <algorithm>
 #include <functional>
 #include <map>
 #include <random>
