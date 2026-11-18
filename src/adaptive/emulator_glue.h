@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace Adaptive::Glue {
 
@@ -74,6 +75,19 @@ inline void NoteInput() {
 
 /// Emulator::Shutdown: judges this launch, saves what was learned, writes the report.
 void Shutdown();
+
+/// Second Son game patches (core/second_son_patches.h), from user/adaptive/settings.ini; they
+/// are written into the game before its entry runs, so a change applies at the next launch.
+struct GamePatchSettings {
+    bool particle_late_read = true;
+    bool particle_light_one_submit = false;
+    std::uint32_t perf_mode = 0; ///< 0 off, 1 low, 2 office
+};
+GamePatchSettings GamePatches();
+/// Saves them for the next launch.
+void SetGamePatches(const GamePatchSettings& patches);
+/// Patch decisions of this launch, one line each (empty before the game started).
+std::vector<std::string> GamePatchNotes();
 
 /// Frame rate limit (F3 settings > Graphics): 0 = off. Applies at once and is saved to
 /// user/adaptive/settings.ini.

@@ -72,6 +72,12 @@ void SettingsWindow::LoadSettings(std::string profile) {
             frameLimitSetting = static_cast<int>(it - frameLimitValues.begin());
         }
     }
+    {
+        const auto patches = Adaptive::Glue::GamePatches();
+        perfModeSetting = static_cast<int>(std::min<u32>(patches.perf_mode, 2));
+        particleLateReadSetting = patches.particle_late_read;
+        particleLightsSetting = patches.particle_light_one_submit;
+    }
     windowHeightSetting = EmulatorSettings.GetWindowHeight();
     windowWidthSetting = EmulatorSettings.GetWindowWidth();
     hdrAllowedSetting = EmulatorSettings.IsHdrAllowed();
@@ -134,6 +140,17 @@ void SettingsWindow::SaveSettings(std::string profile) {
     EmulatorSettings.SetFullScreenMode(fullscreenModeOptions.at(fullscreenModeSetting), isSpecific);
     EmulatorSettings.SetPresentMode(presentModeOptions.at(presentModeSetting), isSpecific);
     Adaptive::Glue::SetFrameLimit(frameLimitValues.at(frameLimitSetting));
+    {
+        const auto before = Adaptive::Glue::GamePatches();
+        const Adaptive::Glue::GamePatchSettings now{particleLateReadSetting,
+                                                    particleLightsSetting && particleLateReadSetting,
+                                                    static_cast<u32>(perfModeSetting)};
+        if (now.perf_mode != before.perf_mode ||
+            now.particle_late_read != before.particle_late_read ||
+            now.particle_light_one_submit != before.particle_light_one_submit) {
+            Adaptive::Glue::SetGamePatches(now);
+        }
+    }
     EmulatorSettings.SetWindowHeight(windowHeightSetting, isSpecific);
     EmulatorSettings.SetWindowWidth(windowWidthSetting, isSpecific);
     EmulatorSettings.SetHdrAllowed(hdrAllowedSetting, isSpecific);
@@ -746,6 +763,15 @@ void SettingsWindow::DrawSettingsTable(SettingsCategory category) {
             AddSettingCombo("Present Mode", presentModeSetting, presentModeOptions);
             AddSettingCombo("Frame Rate Limit (FPS, applies at once)", frameLimitSetting,
                             frameLimitOptions);
+            AddSettingCombo("Second Son: Performance Mode (next launch)", perfModeSetting,
+                            perfModeOptions);
+            AddSettingCheckbox("Second Son: Particle Timing Fix (next launch)",
+                               particleLateReadSetting);
+            if (particleLateReadSetting) {
+                AddSettingCheckbox("Second Son: Particle Lights in One Submit (experimental, "
+                                   "next launch)",
+                                   particleLightsSetting);
+            }
             AddSettingSliderInt("Window Width", windowWidthSetting, 0, 8000);
             AddSettingSliderInt("Window Height", windowHeightSetting, 0, 7000);
             AddSettingCheckbox("Enable HDR", hdrAllowedSetting);

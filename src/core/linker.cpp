@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "adaptive/emulator_glue.h"
 #include "common/alignment.h"
 #include "common/arch.h"
 #include "common/assert.h"
@@ -26,6 +27,7 @@
 #include "core/linker.h"
 #include "core/memory.h"
 #include "core/mouse_aim.h"
+#include "core/second_son_patches.h"
 #include "core/tls.h"
 #include "ipc/ipc.h"
 
@@ -208,6 +210,13 @@ void Linker::Execute(const std::vector<std::string>& args) {
         // Native mouse camera: the hook goes into the eboot before its entry runs, and only if
         // the eboot is a build whose camera code and data offsets were measured (mouse_aim.cpp).
         Core::MouseAim::InstallCameraHook(module->GetBaseAddress(), module->aligned_base_size);
+        // Second Son (update 01.07) game patches from the v1.1.1 fork, byte-checked first.
+        {
+            const auto g = Adaptive::Glue::GamePatches();
+            Core::SecondSonPatches::Apply(
+                module->GetBaseAddress(), module->aligned_base_size,
+                {g.particle_late_read, g.particle_light_one_submit, g.perf_mode});
+        }
 #endif
 
         // Add all guest arguments, we will always have the executable path in argv[0]

@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <cstdio>
+#include <string>
 
 #include <imgui.h>
 
@@ -121,6 +122,16 @@ public:
                     if (ImGui::SmallButton(r.scope == Scope::Live ? "Try it" : "Test next launch")) {
                         brain->RequestApply(r.knob, r.value);
                     }
+                } else if (r.knob == KnobId::PerfMode) {
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Use next launch")) {
+                        auto patches = Glue::GamePatches();
+                        patches.perf_mode = static_cast<std::uint32_t>(r.value);
+                        Glue::SetGamePatches(patches);
+                        Overlay::Notice::Show(std::string("Performance mode ") +
+                                              (r.value == 1 ? "low" : "office") +
+                                              " from the next launch (F3 > Graphics to change)");
+                    }
                 } else if (r.knob == KnobId::FrameLimit) {
                     ImGui::SameLine();
                     if (ImGui::SmallButton("Set it")) {
@@ -133,6 +144,17 @@ public:
                 }
                 ImGui::PopID();
             }
+        }
+
+        if (ImGui::CollapsingHeader("Second Son game patches")) {
+            const auto notes = Glue::GamePatchNotes();
+            if (notes.empty()) {
+                ImGui::TextDisabled("none this launch");
+            }
+            for (const auto& n : notes) {
+                ImGui::BulletText("%s", n.c_str());
+            }
+            ImGui::TextDisabled("Change them in F3 > Graphics (they apply at the next launch).");
         }
 
         if (ImGui::CollapsingHeader("Mini-brains")) {

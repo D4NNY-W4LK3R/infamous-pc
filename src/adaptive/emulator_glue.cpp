@@ -22,6 +22,7 @@
 #include "common/scm_rev.h"
 #include "common/thread.h"
 #include "core/emulator_settings.h"
+#include "core/second_son_patches.h"
 #include "video_core/renderer_vulkan/vk_pipeline_compiler.h"
 
 #ifdef _WIN32
@@ -234,6 +235,7 @@ void Startup(const std::string& game_serial, const std::string& app_version,
                                  d.pipeline_workers, 12);
     d.upload_wake_jobs = 8;
     d.frame_limit = g_settings.frame_limit;
+    d.perf_mode = g_settings.perf_mode;
     {
         const std::string pm = EmulatorSettings.GetPresentMode();
         d.present_mode = pm == "Fifo" ? 1 : pm == "Immediate" ? 2 : 0;
@@ -351,6 +353,58 @@ UserSettings& SettingsForOverlay() {
 
 void SaveSettingsFromOverlay() {
     SaveSettings(g_dir / "settings.ini", g_settings);
+}
+
+namespace {
+/// The settings file, read fresh when no game has started (launcher settings window).
+UserSettings CurrentSettings() {
+    if (!g_dir.empty()) {
+        return g_settings;
+    }
+    const auto dir = Common::FS::GetUserPath(Common::FS::PathType::UserDir) / "adaptive";
+    return LoadSettings(dir / "settings.ini", [](const std::string&) { return std::nullopt; });
+}
+
+void SaveChanged(const std::function<void(UserSettings&)>& change) {
+    if (!g_dir.empty()) {
+        change(g_settings);
+        SaveSettings(g_dir / "settings.ini", g_settings);
+        return;
+    }
+    const auto dir = Common::FS::GetUserPath(Common::FS::PathType::UserDir) / "adaptive";
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    UserSettings s =
+        LoadSettings(dir / "settings.ini", [](const std::string&) { return std::nullopt; });
+    change(s);
+    SaveSettings(dir / "settings.ini", s);
+}
+} // namespace
+
+GamePatchSettings GamePatches() {
+    const UserSettings s = CurrentSettings();
+    return GamePatchSettings{s.particle_late_read, s.particle_light_one_submit, s.perf_mode};
+}
+
+void SetGamePatches(const GamePatchSettings& patches) {
+    SaveChanged([&patches](UserSettings& s) {
+        s.particle_late_read = patches.particle_late_read;
+        s.particle_light_one_submit = patches.particle_light_one_submit;
+        s.perf_mode = patches.perf_mode > 2 ? 0 : patches.perf_mode;
+    });
+    LOG_INFO(Render,
+             "Second Son game patches for the next launch: particle late-read {}, lights in one "
+             "submit {}, performance mode {}",
+             patches.particle_late_read ? "on" : "off",
+             patches.particle_light_one_submit ? "on" : "off",
+             patches.perf_mode == 1 ? "low" : patches.perf_mode == 2 ? "office" : "off");
+    if (g_brain) {
+        g_brain->RequestNoteUserSetting(KnobId::PerfMode, patches.perf_mode);
+    }
+}
+
+std::vector<std::string> GamePatchNotes() {
+    return Core::SecondSonPatches::Applied().notes;
 }
 
 std::uint32_t FrameLimit() {

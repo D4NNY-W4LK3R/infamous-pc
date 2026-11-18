@@ -50,9 +50,12 @@ set(ADAPTIVE_SOURCES
     ${SRC}/adaptive/stats.cpp
     ${SRC}/adaptive/telemetry.cpp
     ${SRC}/input/camera_hook_signature.cpp
+    ${SRC}/core/second_son_patches.cpp
 )
 
 add_library(adaptive_core STATIC ${ADAPTIVE_SOURCES})
+# The game patches' planning is pure; Apply (logging, VirtualQuery) belongs to the emulator.
+target_compile_definitions(adaptive_core PUBLIC SECOND_SON_PATCHES_STANDALONE)
 target_include_directories(adaptive_core PUBLIC ${SRC})
 if (MSVC)
     target_compile_options(adaptive_core PRIVATE /W4)
@@ -68,6 +71,7 @@ add_executable(adaptive_tests
     test_brain.cpp
     test_mini_brains.cpp
     test_settings.cpp
+    test_second_son_patches.cpp
     test_camera_signature.cpp
 )
 target_link_libraries(adaptive_tests PRIVATE adaptive_core GTest::gtest_main)

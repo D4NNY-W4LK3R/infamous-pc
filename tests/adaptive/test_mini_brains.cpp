@@ -137,6 +137,17 @@ TEST(MiniBrains, FramePacingOnlyRecommendsUserSettings) {
     ASSERT_EQ(p.size(), 1u);
     EXPECT_EQ(p[0].knob, KnobId::FrameLimit);
     EXPECT_EQ(p[0].value, 30);
+    // 19 fps with the card as the limit (the city after the powers): the game's low quality.
+    s = Steady(Bottleneck::HostGpuBound);
+    s.frame_ms_p50 = 52.0;
+    s.frame_ms_p99 = 60.0;
+    p = b->Think(s, Defaults(*b));
+    ASSERT_EQ(p.size(), 1u);
+    EXPECT_EQ(p[0].knob, KnobId::PerfMode);
+    EXPECT_EQ(p[0].value, 1);
+    // Not when the game's own CPU work is the limit.
+    s.bottleneck = Bottleneck::GuestBound;
+    EXPECT_TRUE(b->Think(s, Defaults(*b)).empty());
 }
 
 TEST(MiniBrains, QuietWhenNotInGameplay) {

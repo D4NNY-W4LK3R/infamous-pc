@@ -307,7 +307,10 @@ public:
                               "swapchain present mode (emulator setting)"},
                      KnobSpec{KnobId::FrameLimit, Domain::FramePacing, Scope::Never,
                               d.frame_limit, 0, 240, {0, 30, 40, 45, 60}, "fps, 0 = off",
-                              "frame rate limit (F3 settings > Graphics)"}}) {}
+                              "frame rate limit (F3 settings > Graphics)"},
+                     KnobSpec{KnobId::PerfMode, Domain::FramePacing, Scope::Never, d.perf_mode,
+                              0, 2, {0, 1, 2}, "0 off / 1 low / 2 office",
+                              "Second Son's own quality levels (F3 > Graphics, next launch)"}}) {}
 
     std::vector<Proposal> Think(const Snapshot& s, const std::vector<std::int64_t>& v) override {
         const double frame_wait = Stall(s, StallKind::FrameWait);
@@ -330,6 +333,19 @@ public:
                                       "same time",
                                       ratio, 1000.0 / s.frame_ms_p50),
                                   0.1));
+        }
+        // Well under 30 fps with the graphics card as the limit: the game's own lower quality
+        // level draws less (field data: GTX 1650, 19 fps in the city after the powers). It changes
+        // the picture, so it is only ever recommended.
+        const bool card_bound = s.bottleneck == Bottleneck::HostGpuBound ||
+                                s.bottleneck == Bottleneck::MemoryPressure;
+        if (card_bound && s.frame_ms_p50 > 36.0 && v[2] < 2) {
+            out.push_back(Propose(2, v[2] + 1,
+                                  Fmt("%.0f fps with the graphics card as the limit; the game's "
+                                      "lower quality level draws less (next launch)",
+                                      1000.0 / s.frame_ms_p50) +
+                                      (v[2] == 0 ? " - low" : " - office"),
+                                  0.15));
         }
         // Uneven pacing at higher rates while presentation is not the limit: Fifo paces frames
         // evenly.

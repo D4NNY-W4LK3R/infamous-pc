@@ -84,6 +84,26 @@ UserSettings ParseSettings(const std::string& text) {
                 continue;
             }
             s.tick_ms = v;
+        } else if (key == "perf_mode") {
+            std::string v = value;
+            std::transform(v.begin(), v.end(), v.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (v == "off" || v == "0") {
+                s.perf_mode = 0;
+            } else if (v == "low" || v == "1") {
+                s.perf_mode = 1;
+            } else if (v == "office" || v == "2") {
+                s.perf_mode = 2;
+            } else {
+                s.warnings.push_back("perf_mode must be off, low or office");
+            }
+        } else if (key == "particle_late_read" || key == "particle_light_one_submit") {
+            const auto b = ParseBool(value);
+            if (!b) {
+                s.warnings.push_back(key + " '" + value + "' is not 0/1");
+                continue;
+            }
+            (key == "particle_late_read" ? s.particle_late_read : s.particle_light_one_submit) = *b;
         } else if (key == "frame_limit") {
             std::uint32_t v = 0;
             const auto r = std::from_chars(value.data(), value.data() + value.size(), v);
@@ -114,6 +134,12 @@ std::string SerializeSettings(const UserSettings& s) {
     o << "tick_ms = " << s.tick_ms << '\n';
     o << "# most frames per second shown; 0 = no limit (F3 settings > Graphics)\n";
     o << "frame_limit = " << s.frame_limit << '\n';
+    o << "# Second Son game patches (update 01.07 only; F3 settings > Graphics; next launch)\n";
+    o << "# perf_mode: off | low | office - the game's own lower quality levels (less detail far\n"
+         "#   away, one shadow layer less, lower-resolution particles, fewer high-res textures)\n";
+    o << "perf_mode = " << (s.perf_mode == 1 ? "low" : s.perf_mode == 2 ? "office" : "off") << '\n';
+    o << "particle_late_read = " << (s.particle_late_read ? 1 : 0) << '\n';
+    o << "particle_light_one_submit = " << (s.particle_light_one_submit ? 1 : 0) << '\n';
     return o.str();
 }
 
@@ -128,6 +154,25 @@ UserSettings LoadSettings(const std::filesystem::path& file,
     if (const auto v = env("SS_ADAPTIVE")) {
         if (const auto b = ParseBool(*v)) {
             s.enabled = *b;
+        }
+    }
+    // The v1.1.1 fork's variable names for its game patches win over the file too.
+    if (const auto v = env("SHADPS4_PERF_MODE")) {
+        const auto parsed = ParseSettings("perf_mode = " + *v + "\n");
+        if (parsed.warnings.empty()) {
+            s.perf_mode = parsed.perf_mode;
+        } else {
+            s.warnings.push_back("SHADPS4_PERF_MODE '" + *v + "' must be off, low or office");
+        }
+    }
+    if (const auto v = env("SHADPS4_PARTICLE_LATE_READ")) {
+        if (const auto b = ParseBool(*v)) {
+            s.particle_late_read = *b;
+        }
+    }
+    if (const auto v = env("SHADPS4_PARTICLE_LIGHT_ONE_SUBMIT")) {
+        if (const auto b = ParseBool(*v)) {
+            s.particle_light_one_submit = *b;
         }
     }
     if (const auto v = env("SS_FRAME_LIMIT")) {

@@ -64,3 +64,24 @@ TEST(Settings, FrameLimitParsesRoundTripsAndRejectsNonsense) {
     };
     EXPECT_EQ(LoadSettings("/nonexistent/settings.ini", env).frame_limit, 30u);
 }
+
+TEST(Settings, GamePatchOptions) {
+    const auto d = ParseSettings("");
+    EXPECT_EQ(d.perf_mode, 0u);
+    EXPECT_TRUE(d.particle_late_read);
+    EXPECT_FALSE(d.particle_light_one_submit);
+    const auto s = ParseSettings("perf_mode = Office\nparticle_late_read = 0\n"
+                                 "particle_light_one_submit = 1\nperf_mode_typo = 1\n");
+    EXPECT_EQ(s.perf_mode, 2u);
+    EXPECT_FALSE(s.particle_late_read);
+    EXPECT_TRUE(s.particle_light_one_submit);
+    EXPECT_EQ(s.warnings.size(), 1u);
+    EXPECT_EQ(ParseSettings("perf_mode = ultra\n").perf_mode, 0u);
+    UserSettings r;
+    r.perf_mode = 1;
+    r.particle_late_read = false;
+    const auto back = ParseSettings(SerializeSettings(r));
+    EXPECT_EQ(back.perf_mode, 1u);
+    EXPECT_FALSE(back.particle_late_read);
+    EXPECT_TRUE(back.warnings.empty());
+}

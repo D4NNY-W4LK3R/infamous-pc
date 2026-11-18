@@ -78,6 +78,20 @@ FRAME RATE AND SETTINGS (F3)
   user\adaptive\settings.ini (frame_limit). Keep Present Mode on Mailbox: vsync (Fifo) at 60 Hz
   makes ~30 fps frames alternate between one and two refreshes.
 
+SECOND SON GAME PATCHES (F3 > Graphics, apply at the next launch; game update 01.07 only)
+  Ported from the shadPS4-second-son v1.1.1 fork. Each checks the game's code byte for byte
+  first and is skipped if anything differs; F1 > "Second Son game patches" shows what is on.
+  Particle Timing Fix (on): the game reads its particle results one frame later instead of
+    waiting for the graphics card in the middle of every frame.
+  Particle Lights in One Submit (off, experimental): fewer GPU submissions in big fights.
+  Performance Mode: Off / Low / Office - the game's own lower quality levels.
+    Low:    less detail far away, one sun-shadow layer less, particles (smoke!) at half
+            resolution, fewer high-resolution textures (saves video memory).
+    Office: even less detail, particles at quarter resolution, no high-resolution textures,
+            half the pedestrians.
+  The optimizer recommends Low when the game stays well under 30 fps because of the graphics
+  card ("Use next launch" in F1). If anything looks or behaves wrong, turn the patch off in F3.
+
 UPDATING TO A NEW BUILD
   Extract the new zip over the old folder and keep the "user" folder. It holds your saves, the
   shader cache (without it every effect stutters once while it is rebuilt), your settings and

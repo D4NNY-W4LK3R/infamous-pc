@@ -11,6 +11,10 @@
 //   calibrate_on_battery = 0
 //   tick_ms = 1000
 //   frame_limit = 0        most frames per second shown (0 = no limit; F3 > Graphics)
+//   perf_mode = off        Second Son's own quality levels: off | low | office (next launch)
+//   particle_late_read = 1 Second Son reads particle results a frame later instead of waiting
+//                          for the GPU mid-frame (next launch; game update 01.07 only)
+//   particle_light_one_submit = 0  experimental, needs particle_late_read (next launch)
 //
 // Environment variables win over the file (SS_ADAPTIVE_MODE, SS_ADAPTIVE=0). The overlay writes
 // the file back when the user changes the mode, so the choice is remembered.
@@ -36,6 +40,9 @@ struct UserSettings {
     bool calibrate_on_battery = false;
     std::uint32_t tick_ms = 1000;
     std::uint32_t frame_limit = 0; ///< frames per second shown at most; 0 = no limit
+    std::uint32_t perf_mode = 0;   ///< Second Son quality preset: 0 off, 1 low, 2 office
+    bool particle_late_read = true;
+    bool particle_light_one_submit = false;
     std::vector<std::string> warnings; ///< unknown keys, bad values (not fatal)
 };
 

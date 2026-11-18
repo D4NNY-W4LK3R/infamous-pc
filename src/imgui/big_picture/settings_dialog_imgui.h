@@ -119,6 +119,11 @@ private:
     std::vector<std::string> frameLimitOptions = {"Off", "30", "40", "45", "60"};
     std::vector<u32> frameLimitValues = {0, 30, 40, 45, 60};
     int frameLimitSetting = 0;
+    // Second Son game patches (update 01.07; applied at the next launch).
+    const std::vector<std::string> perfModeOptions = {"Off (full quality)", "Low", "Office"};
+    int perfModeSetting = 0;
+    bool particleLateReadSetting = true;
+    bool particleLightsSetting = false;
     const std::vector<std::string> hideCursorOptions = {"Never", "Idle", "Always"};
     const std::vector<std::string> trophySideOptions = {"left", "right", "top", "bottom"};
     const std::vector<std::string> readbacksModeOptions = {"Disabled", "Relaxed", "Precise"};
