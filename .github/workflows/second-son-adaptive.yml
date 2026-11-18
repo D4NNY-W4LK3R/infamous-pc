@@ -180,22 +180,28 @@ jobs:
       - name: Check-only run
         shell: powershell
         run: |
+          $ErrorActionPreference = 'Continue'
           Get-PSDrive -PSProvider FileSystem | Format-Table Name,@{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}}
-          if (!(Test-Path "$env:GITHUB_WORKSPACE\builder-pkg\Build-SecondSonAdaptive.ps1")) { exit 0 }
-          powershell -NoProfile -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\builder-pkg\Build-SecondSonAdaptive.ps1" -CheckOnly -AllowAnyDrive -NonInteractive -MinFreeGB 10 -Workspace C:\ssa *>&1 | Tee-Object -FilePath check.log
-          $code = $LASTEXITCODE
-          if ($code -ne 0) {
-            Get-Content check.log | Select-Object -Last 25 | ForEach-Object { Write-Output "::error title=builder check::$_" }
+          $ps1 = "$env:GITHUB_WORKSPACE\builder-pkg\Build-SecondSonAdaptive.ps1"
+          if (!(Test-Path $ps1)) { exit 0 }
+          $p = Start-Process -FilePath powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$ps1,'-CheckOnly','-AllowAnyDrive','-NonInteractive','-MinFreeGB','10','-Workspace','C:\ssa') -NoNewWindow -Wait -PassThru -RedirectStandardOutput check.out.log -RedirectStandardError check.err.log
+          Get-Content check.out.log, check.err.log
+          if ($p.ExitCode -ne 0) {
+            Get-Content check.out.log, check.err.log | Select-Object -Last 25 | ForEach-Object { Write-Output "::error title=builder check::$_" }
             exit 1
           }
+
       - name: Full builder run
         shell: powershell
         run: |
-          if (!(Test-Path "$env:GITHUB_WORKSPACE\builder-pkg\Build-SecondSonAdaptive.ps1")) { exit 0 }
-          powershell -NoProfile -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\builder-pkg\Build-SecondSonAdaptive.ps1" -AllowAnyDrive -NonInteractive -MinFreeGB 10 -Workspace C:\ssa -Jobs 4 *>&1 | Tee-Object -FilePath full.log
-          $code = $LASTEXITCODE
-          if ($code -ne 0) {
-            Get-Content full.log | Select-String -Pattern 'BUILD STOPPED|error|FAILED' | Select-Object -Last 15 | ForEach-Object { Write-Output "::error title=builder::$($_.Line)" }
-            Get-Content full.log | Select-Object -Last 10 | ForEach-Object { Write-Output "::error title=builder tail::$_" }
+          $ErrorActionPreference = 'Continue'
+          $ps1 = "$env:GITHUB_WORKSPACE\builder-pkg\Build-SecondSonAdaptive.ps1"
+          if (!(Test-Path $ps1)) { exit 0 }
+          $p = Start-Process -FilePath powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$ps1,'-AllowAnyDrive','-NonInteractive','-MinFreeGB','10','-Workspace','C:\ssa','-Jobs','4') -NoNewWindow -Wait -PassThru -RedirectStandardOutput full.out.log -RedirectStandardError full.err.log
+          Get-Content full.out.log -Tail 60
+          Get-Content full.err.log -Tail 20
+          if ($p.ExitCode -ne 0) {
+            Get-Content full.out.log, full.err.log | Select-String -Pattern 'BUILD STOPPED|error|FAILED' | Select-Object -Last 15 | ForEach-Object { Write-Output "::error title=builder::$($_.Line)" }
+            Get-Content full.out.log, full.err.log | Select-Object -Last 12 | ForEach-Object { Write-Output "::error title=builder tail::$_" }
             exit 1
           }
