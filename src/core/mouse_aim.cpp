@@ -12,6 +12,8 @@
 #include <numbers>
 #include <optional>
 #include <string>
+#include <fmt/format.h>
+
 #include "common/arch.h"
 #include "common/elf_info.h"
 #include "common/logging/log.h"
