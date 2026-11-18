@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <chrono>
+#include <cstdio>
 #include <thread>
 
 #include <gtest/gtest.h>
@@ -123,4 +125,27 @@ TEST(TelemetryWindow, LoadingGapIsNotGameplay) {
     }
     w.Add(frames);
     EXPECT_FALSE(w.Build(t).in_gameplay);
+}
+
+TEST(FrameRing, PublishCostIsSmall) {
+    // The flip thread pays this once per frame. Reported, and bounded generously so sanitizer
+    // and debug builds pass; a release build measures tens of nanoseconds.
+    FrameRing ring;
+    FrameSample f = Frame(0, 0, 16.6f);
+    constexpr int N = 200000;
+    std::vector<FrameSample> sink;
+    sink.reserve(FrameRing::Capacity);
+    const auto t0 = std::chrono::steady_clock::now();
+    for (int i = 0; i < N; ++i) {
+        f.frame_index = static_cast<std::uint64_t>(i);
+        ring.Push(f);
+        if ((i & 2047) == 2047) {
+            sink.clear();
+            ring.Drain(sink);
+        }
+    }
+    const double ns =
+        std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t0).count() / N;
+    std::printf("[ measure  ] FrameRing::Push + amortized Drain: %.1f ns per frame\n", ns);
+    EXPECT_LT(ns, 5000.0);
 }
