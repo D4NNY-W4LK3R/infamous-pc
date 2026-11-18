@@ -6,6 +6,9 @@
 # patches on top of the pinned infamous-pc v1.1.0 commit, each with its SHA-256, and the source
 # tree hash the patched checkout must have. Usage: make_builder_package.sh <output dir>
 set -euo pipefail
+if [ -n "${GITHUB_ACTIONS:-}" ]; then
+    trap 'echo "::error title=builder package::line $LINENO: $BASH_COMMAND"' ERR
+fi
 
 BASE_REPO="https://github.com/MeWeGo/infamous-pc.git"
 BASE_COMMIT="2c599e026f2b69166fd71eac4343f14152a34d38" # tag v1.1.0
