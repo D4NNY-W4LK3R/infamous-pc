@@ -28,10 +28,17 @@ struct SafetyLimits {
     std::uint64_t change_window_ns = 600'000'000'000ull; ///< per 10 minutes
     double warmup_shader_ms_per_frame = 2.0; ///< above this, shaders are still compiling
     std::uint32_t max_emergency_rollbacks = 2;
-    /// Emergency rollback: a second whose p99 exceeds reference p99 by this factor...
-    double emergency_p99_factor = 2.0;
-    /// ...or whose median exceeds the reference median by this factor.
+    /// A "slow" second: median above the reference median by this factor.
     double emergency_median_factor = 1.35;
+    /// A "spike" second: p99 above the reference p99 by this factor (and above 50 ms).
+    double emergency_p99_factor = 2.0;
+    /// Emergency rollback needs sustained evidence, never one second: this many slow seconds in
+    /// a row, or this many spike seconds among the last emergency_spike_window. (Field data:
+    /// Second Son on a 4 GB card hitches ~6 times a minute on its own; one 130 ms frame during a
+    /// test is the game, not the change.)
+    std::uint32_t emergency_slow_seconds = 2;
+    std::uint32_t emergency_spike_seconds = 3;
+    std::uint32_t emergency_spike_window = 5;
 };
 
 struct GateContext {
@@ -54,9 +61,14 @@ public:
     /// Records an applied change for rate limiting.
     void NoteApplied(const std::string& knob, std::uint64_t now_ns);
 
-    /// True when a second measured during an evaluation is bad enough to roll back at once.
+    /// True when one second measured during an evaluation is bad (slow or spiking). A single
+    /// bad second is not an emergency; see SustainedEmergency.
     bool IsEmergency(double second_median_ms, double second_p99_ms, double ref_median_ms,
                      double ref_p99_ms) const;
+    bool IsSlowSecond(double second_median_ms, double ref_median_ms) const;
+    bool IsSpikeSecond(double second_p99_ms, double ref_p99_ms) const;
+    /// slow_streak: consecutive slow seconds; recent_spikes: spike flags of the latest seconds.
+    bool SustainedEmergency(std::uint32_t slow_streak, const std::deque<bool>& recent_spikes) const;
     void NoteEmergencyRollback();
     bool KillSwitchTripped() const {
         return emergency_rollbacks >= limits.max_emergency_rollbacks;

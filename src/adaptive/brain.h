@@ -198,9 +198,11 @@ private:
         std::uint32_t block = 0; ///< even = new value (B), odd = old value (A)
         std::uint64_t last_second_seen = 0;
         std::vector<double> a_median, b_median, a_p99, b_p99;
-        std::uint32_t a_hitches = 0, b_hitches = 0;
+        std::uint32_t a_hitches = 0, b_hitches = 0; ///< seconds that held at least one hitch
         double ref_median = 0.0, ref_p99 = 0.0;
         bool confirm_only = false; ///< reapplying a learned value: watch, do not A/B
+        std::uint32_t slow_streak = 0;  ///< consecutive slow seconds with the new value
+        std::deque<bool> recent_spikes; ///< spike flags of the latest new-value seconds
         std::string reason;
     };
 

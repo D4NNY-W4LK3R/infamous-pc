@@ -178,6 +178,7 @@ bool KnowledgeStore::Parse(const std::string& text, Knowledge& out, bool& schema
             schema_changed = true;
         }
     }
+    const std::uint32_t loaded_version = k.schema_version;
     Profile* cur = nullptr;
     std::string cur_key;
     while (std::getline(in, line)) {
@@ -307,6 +308,14 @@ bool KnowledgeStore::Parse(const std::string& text, Knowledge& out, bool& schema
             p.baseline_seconds_ms.clear();
             p.baseline_seconds_p99_ms.clear();
             p.revalidation_reason = "knowledge schema changed";
+            if (loaded_version < 2) {
+                // v1 could block a value after a single hitch second; give those another chance.
+                for (auto& [knob, values] : p.rejected) {
+                    std::erase_if(values,
+                                  [](const auto& kv) { return kv.second == Outcome::Regressed; });
+                }
+                std::erase_if(p.rejected, [](const auto& kv) { return kv.second.empty(); });
+            }
         }
         k.schema_version = KnowledgeSchemaVersion;
     }

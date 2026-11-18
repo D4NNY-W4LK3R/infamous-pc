@@ -108,14 +108,29 @@ void SafetyGate::NoteApplied(const std::string&, std::uint64_t now_ns) {
     }
 }
 
+bool SafetyGate::IsSlowSecond(double second_median_ms, double ref_median_ms) const {
+    return ref_median_ms > 0.0 && second_median_ms > ref_median_ms * limits.emergency_median_factor;
+}
+
+bool SafetyGate::IsSpikeSecond(double second_p99_ms, double ref_p99_ms) const {
+    return ref_p99_ms > 0.0 && second_p99_ms > ref_p99_ms * limits.emergency_p99_factor &&
+           second_p99_ms > 50.0;
+}
+
 bool SafetyGate::IsEmergency(double second_median_ms, double second_p99_ms, double ref_median_ms,
                              double ref_p99_ms) const {
-    if (ref_median_ms <= 0.0) {
-        return false;
+    return IsSlowSecond(second_median_ms, ref_median_ms) ||
+           IsSpikeSecond(second_p99_ms, ref_p99_ms);
+}
+
+bool SafetyGate::SustainedEmergency(std::uint32_t slow_streak,
+                                    const std::deque<bool>& recent_spikes) const {
+    std::uint32_t spikes = 0;
+    for (const bool s : recent_spikes) {
+        spikes += s ? 1 : 0;
     }
-    return second_median_ms > ref_median_ms * limits.emergency_median_factor ||
-           (ref_p99_ms > 0.0 && second_p99_ms > ref_p99_ms * limits.emergency_p99_factor &&
-            second_p99_ms > 50.0);
+    return slow_streak >= limits.emergency_slow_seconds ||
+           spikes >= limits.emergency_spike_seconds;
 }
 
 void SafetyGate::NoteEmergencyRollback() {

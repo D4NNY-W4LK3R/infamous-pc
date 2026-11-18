@@ -254,6 +254,35 @@ TEST(Brain, EmergencyRollbackIsImmediateAndTripsTheKillSwitch) {
     EXPECT_EQ(p.rejected.at(KnobId::TextureGcHeadroomMb).at(256), Outcome::Regressed);
 }
 
+TEST(Brain, OneHitchDuringATestIsNotAnEmergency) {
+    // Field case (build 14 log): the new value was faster (29.1 -> 27.5 ms medians) but one second
+    // held a 130 ms scene-streaming hitch, and v1 rolled it back and blocked it.
+    World w;
+    w.frame_ms = [](World& x) { return x.tex_headroom.load() >= 256 ? 30.5 : 33.3; };
+    std::uint64_t first_new_frame = 0;
+    w.spike = [&first_new_frame](World& x) {
+        if (x.tex_headroom.load() < 256) {
+            return 0.0;
+        }
+        if (first_new_frame == 0) {
+            first_new_frame = x.frame;
+        }
+        // One second, 5 s into the first new-value block: a few frames near 130 ms.
+        const std::uint64_t f = x.frame - first_new_frame;
+        return f >= 150 && f < 153 ? 100.0 : 0.0;
+    };
+    const auto dir = TempDir("one-hitch");
+    Rig rig(w, dir, Mode::Automatic);
+    rig.Start();
+    w.Seconds(*rig.brain, 260);
+    EXPECT_FALSE(rig.brain->Status().kill_switch);
+    rig.brain->Shutdown();
+    const Profile p = LoadProfile(dir);
+    ASSERT_NE(first_new_frame, 0u) << "the test never started";
+    EXPECT_FALSE(p.rejected.contains(KnobId::TextureGcHeadroomMb));
+    EXPECT_EQ(p.validated.at(KnobId::TextureGcHeadroomMb), 256);
+}
+
 TEST(Brain, CalibrationLearnsAStartupValueAcrossLaunches) {
     const auto dir = TempDir("calibration");
     // The simulated emulator reads SHAD_PREFETCH_BACKOFF_MAX at startup; 2 is faster here.

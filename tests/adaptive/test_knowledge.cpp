@@ -161,7 +161,9 @@ TEST(KnowledgeStore, SchemaChangeKeepsHistoryDropsLearnedValues) {
     std::string text = KnowledgeStore::Serialize(Sample());
     // Rewrite as schema 0 with a valid checksum.
     text = text.substr(0, text.rfind("checksum "));
-    text.replace(text.find(" 1\n"), 3, " 0\n");
+    const std::string header = "SSADAPTIVE-KNOWLEDGE " + std::to_string(KnowledgeSchemaVersion) + "\n";
+    ASSERT_EQ(text.rfind(header, 0), 0u);
+    text.replace(0, header.size(), "SSADAPTIVE-KNOWLEDGE 0\n");
     text += "checksum " + Hex64(Fnv1a64(text.data(), text.size())) + "\n";
     Knowledge k;
     bool sc = false;
@@ -172,6 +174,8 @@ TEST(KnowledgeStore, SchemaChangeKeepsHistoryDropsLearnedValues) {
     EXPECT_EQ(p.revalidate.at("SS_TEXCACHE_GC_HEADROOM_MB"), 256);
     EXPECT_EQ(p.history.size(), 1u);
     EXPECT_EQ(p.rejected.at("SS_PIPELINE_WORKERS").at(6), Outcome::Crashed);
+    // Pre-v2 regressions (possibly from a single hitch) are forgiven; crashes are not.
+    EXPECT_EQ(p.rejected.count("SHAD_READBACK_WINDOW_KB"), 0u);
 }
 
 TEST(SelectProfile, DriverChangeRevalidatesAndForgivesOnlyRegressions) {

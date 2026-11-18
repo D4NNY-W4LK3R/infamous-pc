@@ -536,17 +536,26 @@ void CentralBrain::AdvanceEvaluation(std::uint64_t now) {
             continue;
         }
         const bool new_value_active = ev.confirm_only || ev.block % 2 == 0;
-        if (new_value_active && gate.IsEmergency(s.median_ms, s.p99_ms, ev.ref_median, ev.ref_p99)) {
+        if (!new_value_active) {
+            ev.slow_streak = 0;
+        } else {
+            ev.slow_streak = gate.IsSlowSecond(s.median_ms, ev.ref_median) ? ev.slow_streak + 1 : 0;
+            ev.recent_spikes.push_back(gate.IsSpikeSecond(s.p99_ms, ev.ref_p99));
+            while (ev.recent_spikes.size() > gate.Limits().emergency_spike_window) {
+                ev.recent_spikes.pop_front();
+            }
+        }
+        if (new_value_active && gate.SustainedEmergency(ev.slow_streak, ev.recent_spikes)) {
             const auto key = std::make_pair(ev.knob, ev.new_value);
             const std::uint32_t n = ++emergency_counts[key];
             gate.NoteEmergencyRollback();
             FinishEvaluation(n >= 2 ? Outcome::Regressed : Outcome::Abandoned,
-                             F("emergency rollback: a second at %.1f ms median / %.1f ms p99 "
-                               "against %.1f / %.1f before the change",
+                             F("emergency rollback: sustained slowdown (latest second %.1f ms "
+                               "median / %.1f ms p99 against %.1f / %.1f before the change)",
                                s.median_ms, s.p99_ms, ev.ref_median, ev.ref_p99),
                              now);
             if (n < 2) {
-                // One bad second can be a scene change: allow one more try before blocking it.
+                // A bad stretch can be a scene change: allow one more try before blocking it.
                 session_tried.erase(key);
             }
             return;
@@ -554,11 +563,11 @@ void CentralBrain::AdvanceEvaluation(std::uint64_t now) {
         if (new_value_active) {
             ev.b_median.push_back(s.median_ms);
             ev.b_p99.push_back(s.p99_ms);
-            ev.b_hitches += s.hitches;
+            ev.b_hitches += s.hitches > 0 ? 1 : 0; // hitch seconds: a burst is one event
         } else {
             ev.a_median.push_back(s.median_ms);
             ev.a_p99.push_back(s.p99_ms);
-            ev.a_hitches += s.hitches;
+            ev.a_hitches += s.hitches > 0 ? 1 : 0;
         }
     }
     if (ev.confirm_only) {
@@ -602,14 +611,16 @@ Outcome CentralBrain::Judge(const std::vector<double>& a_med, const std::vector<
     const bool regressed =
         (cmp.p_value < config.significance && cmp.relative_change >= config.regress_threshold) ||
         (p99.p_value < config.significance && p99.relative_change > 2.0 * config.p99_tolerance) ||
-        b_hitch_rate > a_hitch_rate * 2.0 + 1.0;
+        // Rates are hitch-seconds per minute over ~50 s per side, so one event is ~1.2/min:
+        // regressing on hitches needs about three more hitch-seconds than the other side.
+        b_hitch_rate > a_hitch_rate * 2.0 + 3.0;
     if (regressed) {
         return Outcome::Regressed;
     }
     const bool improved = cmp.p_value < config.significance &&
                           cmp.relative_change <= -config.improve_threshold &&
                           p99.relative_change <= config.p99_tolerance &&
-                          b_hitch_rate <= a_hitch_rate * 1.25 + 0.5;
+                          b_hitch_rate <= a_hitch_rate * 1.25 + 1.5;
     return improved ? Outcome::Improved : Outcome::Neutral;
 }
 
@@ -910,6 +921,9 @@ void CentralBrain::RequestApply(const std::string& knob, std::int64_t value) {
         } else if (st->spec.scope == Scope::NextLaunch) {
             if (Profile* p = CurrentProfile()) {
                 p->revalidate[knob] = value;
+                if (p->revalidation_reason.empty()) {
+                    p->revalidation_reason = "you asked to test it";
+                }
                 SaveKnowledge();
             }
             Note(knob + "=" + std::to_string(value) +

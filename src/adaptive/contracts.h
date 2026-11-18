@@ -32,7 +32,9 @@ inline constexpr std::uint32_t ContractVersionMajor = 1;
 inline constexpr std::uint32_t ContractVersionMinor = 0;
 /// Bumped whenever the meaning of a stored knowledge record changes. Older files are not
 /// reinterpreted: their learned values are dropped and re-measured (their history is kept).
-inline constexpr std::uint32_t KnowledgeSchemaVersion = 1;
+/// 2: emergency rollback needs sustained evidence; v1 "Regressed" blocks (often from one
+///    hitch) are forgiven on load. Crash blocks are kept.
+inline constexpr std::uint32_t KnowledgeSchemaVersion = 2;
 
 /// Optimization control mode, chosen by the user (Architecture v1.0 sec. 3).
 enum class Mode : std::uint8_t {
