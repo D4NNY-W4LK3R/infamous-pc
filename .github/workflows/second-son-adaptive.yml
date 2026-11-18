@@ -67,6 +67,22 @@ jobs:
           append-timestamp: false
           key: ssa-win-ccache-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
 
+      # The runner's stand-alone LLVM can be older than the MSVC STL accepts (STL1000). Visual
+      # Studio's own clang-cl always matches its STL, as on the player's PC.
+      - name: Use Visual Studio's own clang-cl
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $llvm = Join-Path $vs 'VC\Tools\Llvm\x64\bin'
+          if (Test-Path "$llvm\clang-cl.exe") {
+            $llvm | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+            & "$llvm\clang-cl.exe" --version
+          } else {
+            Write-Output "::warning::Visual Studio has no bundled clang-cl; allowing the STL version mismatch"
+            "CXXFLAGS=/D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+            "CFLAGS=/D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          }
+
       - name: Configure
         run: cmake --fresh -G Ninja -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE=ON -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_EXE_LINKER_FLAGS=/MAP
 

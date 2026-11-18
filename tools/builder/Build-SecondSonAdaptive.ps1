@@ -339,9 +339,15 @@ foreach ($line in $envDump) {
     if ($i -gt 0) { Set-Item -Path ("Env:" + $line.Substring(0, $i)) -Value $line.Substring($i + 1) }
 }
 foreach ($name in @('TEMP', 'TMP', 'TMPDIR')) { Set-Item -Path "Env:$name" -Value $script:Temp }
-if (-not (Find-Tool 'clang-cl')) {
-    $llvm = Join-Path $req.VS.Path 'VC\Tools\Llvm\x64\bin'
-    if (Test-Path -LiteralPath (Join-Path $llvm 'clang-cl.exe')) { $env:Path = "$llvm;$env:Path" }
+# Visual Studio's own clang-cl first: it always matches the MSVC STL, while a separately
+# installed LLVM can be older than the STL accepts (error STL1000).
+$llvm = Join-Path $req.VS.Path 'VC\Tools\Llvm\x64\bin'
+if (Test-Path -LiteralPath (Join-Path $llvm 'clang-cl.exe')) {
+    $env:Path = "$llvm;$env:Path"
+} else {
+    Write-Host 'Visual Studio has no bundled clang-cl; using the one on PATH and allowing an STL version mismatch.' -ForegroundColor Yellow
+    $env:CXXFLAGS = '/D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH'
+    $env:CFLAGS = '/D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH'
 }
 if (-not (Find-Tool 'clang-cl')) { Fail 'clang-cl was not found (Visual Studio component "C++ Clang compiler for Windows")' }
 & clang-cl --version | Select-Object -First 1
@@ -351,7 +357,7 @@ if (-not (Find-Tool 'clang-cl')) { Fail 'clang-cl was not found (Visual Studio c
 # ---------------------------------------------------------------------------------------------
 Step "Configuring (Release, clang-cl, Ninja)"
 if ($Clean -and (Test-Path -LiteralPath $script:Build)) { Remove-Item -Recurse -Force -LiteralPath $script:Build }
-& cmake -S $script:Src -B $script:Build -G Ninja -DCMAKE_BUILD_TYPE=Release `
+& cmake --fresh -S $script:Src -B $script:Build -G Ninja -DCMAKE_BUILD_TYPE=Release `
     -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl `
     -DCMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE=ON -DCMAKE_EXE_LINKER_FLAGS=/MAP
 if ($LASTEXITCODE -ne 0) { Fail 'CMake configuration failed (see the log above)' }
@@ -369,7 +375,7 @@ if (-not $SkipTests) {
         Invoke-Git @('clone', '--depth', '1', '--branch', 'v1.17.0', 'https://github.com/google/googletest.git', $gtest)
     }
     $tb = Join-Path $Workspace 'Build\adaptive-tests'
-    & cmake -S (Join-Path $script:Src 'tests\adaptive') -B $tb -G Ninja -DCMAKE_BUILD_TYPE=Release `
+    & cmake --fresh -S (Join-Path $script:Src 'tests\adaptive') -B $tb -G Ninja -DCMAKE_BUILD_TYPE=Release `
         -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl "-DGTEST_SOURCE_DIR=$gtest"
     if ($LASTEXITCODE -ne 0) { Fail 'configuring the tests failed' }
     & cmake --build $tb --parallel $Jobs
