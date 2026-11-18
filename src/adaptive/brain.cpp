@@ -25,7 +25,6 @@ std::int64_t UnixNow() {
     return static_cast<std::int64_t>(std::time(nullptr));
 }
 
-constexpr std::uint64_t Sec = 1'000'000'000ull;
 
 std::uint64_t ToNs(double seconds) {
     return static_cast<std::uint64_t>(seconds * 1e9);

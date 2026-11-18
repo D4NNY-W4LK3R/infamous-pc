@@ -304,16 +304,16 @@ TEST(Brain, CrashDuringExperimentBlocksThatValueForGood) {
         w.Seconds(*rig.brain, 130);
         rig.brain->Shutdown();
     }
-    // Launch 2: an experiment, and the "game" dies (no Shutdown, the brain object leaks).
+    // Launch 2: an experiment, and the "game" dies: Shutdown never runs, so nothing after the
+    // startup save reaches the disk (the destructor only stops the thread, as a crash would).
     PendingExperiment crashed;
     {
         World w;
-        auto* rig = new Rig(w, dir, Mode::Calibration);
-        const auto r = rig->Start();
+        Rig rig(w, dir, Mode::Calibration);
+        const auto r = rig.Start();
         ASSERT_TRUE(r.experiment.has_value());
         crashed = *r.experiment;
-        rig->brain->Stop();
-        // intentionally not deleted / not shut down: models a crash
+        w.Seconds(*rig.brain, 30);
     }
     // Launch 3 sees the open session and blames the experiment.
     World w;

@@ -37,8 +37,13 @@ jobs:
             set -- $cc
             cmake -S tests/adaptive -B build-$1 -G "Unix Makefiles" -DCMAKE_C_COMPILER=$1 -DCMAKE_CXX_COMPILER=$2 \
               -DGTEST_SOURCE_DIR=/tmp/gtest -DADAPTIVE_SANITIZE=ON
-            cmake --build build-$1 -j 4
-            ./build-$1/adaptive_tests --gtest_brief=1
+            if ! cmake --build build-$1 -j 4 > build-$1.log 2>&1; then
+              grep -E "error|FAILED" build-$1.log | head -20 | sed "s/^/::error title=$1 build::/"; exit 1
+            fi
+            if ! ./build-$1/adaptive_tests --gtest_brief=1 > test-$1.log 2>&1; then
+              grep -E "Failure|FAILED|ERROR|Sanitizer" test-$1.log | head -20 | sed "s/^/::error title=$1 tests::/"; exit 1
+            fi
+            tail -3 test-$1.log
           done
 
   windows:
