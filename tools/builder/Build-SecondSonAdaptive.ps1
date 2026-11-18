@@ -353,8 +353,7 @@ Step "Configuring (Release, clang-cl, Ninja)"
 if ($Clean -and (Test-Path -LiteralPath $script:Build)) { Remove-Item -Recurse -Force -LiteralPath $script:Build }
 & cmake -S $script:Src -B $script:Build -G Ninja -DCMAKE_BUILD_TYPE=Release `
     -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl `
-    -DCMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE=ON -DCMAKE_EXE_LINKER_FLAGS=/MAP `
-    -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+    -DCMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE=ON -DCMAKE_EXE_LINKER_FLAGS=/MAP
 if ($LASTEXITCODE -ne 0) { Fail 'CMake configuration failed (see the log above)' }
 
 Step "Building shadPS4.exe with $Jobs parallel jobs (the first build takes 30-90 minutes)"
