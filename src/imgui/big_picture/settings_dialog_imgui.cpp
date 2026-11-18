@@ -7,6 +7,9 @@
 #include <cmrc/cmrc.hpp>
 #include <stb_image.h>
 
+#include <algorithm>
+
+#include "adaptive/emulator_glue.h"
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
@@ -58,6 +61,17 @@ void SettingsWindow::LoadSettings(std::string profile) {
     fullscreenModeSetting =
         GetComboIndex(EmulatorSettings.GetFullScreenMode(), fullscreenModeOptions);
     presentModeSetting = GetComboIndex(EmulatorSettings.GetPresentMode(), presentModeOptions);
+    {
+        const u32 limit = Adaptive::Glue::FrameLimit();
+        const auto it = std::find(frameLimitValues.begin(), frameLimitValues.end(), limit);
+        if (it == frameLimitValues.end()) {
+            frameLimitValues.push_back(limit);
+            frameLimitOptions.push_back(std::to_string(limit));
+            frameLimitSetting = static_cast<int>(frameLimitValues.size() - 1);
+        } else {
+            frameLimitSetting = static_cast<int>(it - frameLimitValues.begin());
+        }
+    }
     windowHeightSetting = EmulatorSettings.GetWindowHeight();
     windowWidthSetting = EmulatorSettings.GetWindowWidth();
     hdrAllowedSetting = EmulatorSettings.IsHdrAllowed();
@@ -119,6 +133,7 @@ void SettingsWindow::SaveSettings(std::string profile) {
     EmulatorSettings.SetFullScreen(isFullscreen);
     EmulatorSettings.SetFullScreenMode(fullscreenModeOptions.at(fullscreenModeSetting), isSpecific);
     EmulatorSettings.SetPresentMode(presentModeOptions.at(presentModeSetting), isSpecific);
+    Adaptive::Glue::SetFrameLimit(frameLimitValues.at(frameLimitSetting));
     EmulatorSettings.SetWindowHeight(windowHeightSetting, isSpecific);
     EmulatorSettings.SetWindowWidth(windowWidthSetting, isSpecific);
     EmulatorSettings.SetHdrAllowed(hdrAllowedSetting, isSpecific);
@@ -729,6 +744,8 @@ void SettingsWindow::DrawSettingsTable(SettingsCategory category) {
 
             AddSettingCombo("Display Mode", fullscreenModeSetting, fullscreenModeOptions);
             AddSettingCombo("Present Mode", presentModeSetting, presentModeOptions);
+            AddSettingCombo("Frame Rate Limit (FPS, applies at once)", frameLimitSetting,
+                            frameLimitOptions);
             AddSettingSliderInt("Window Width", windowWidthSetting, 0, 8000);
             AddSettingSliderInt("Window Height", windowHeightSetting, 0, 7000);
             AddSettingCheckbox("Enable HDR", hdrAllowedSetting);

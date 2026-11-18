@@ -121,6 +121,13 @@ public:
                     if (ImGui::SmallButton(r.scope == Scope::Live ? "Try it" : "Test next launch")) {
                         brain->RequestApply(r.knob, r.value);
                     }
+                } else if (r.knob == KnobId::FrameLimit) {
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Set it")) {
+                        Glue::SetFrameLimit(static_cast<std::uint32_t>(r.value));
+                        Overlay::Notice::Show("Frame rate limit: " + std::to_string(r.value) +
+                                              " fps (F3 > Graphics to change)");
+                    }
                 } else {
                     ImGui::TextDisabled("  (an emulator setting - change it in F3 settings)");
                 }

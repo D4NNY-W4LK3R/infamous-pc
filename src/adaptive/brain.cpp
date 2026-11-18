@@ -535,6 +535,13 @@ void CentralBrain::AdvanceEvaluation(std::uint64_t now) {
         if (s.frames < 10 || s.start_ns < ev.block_start_ns + settle) {
             continue;
         }
+        // Seconds spent compiling shaders measure the shader cache, not the setting: they count
+        // neither as evidence for an emergency nor as samples (field data: a fresh cache gave
+        // 0.6-0.9 s compile stalls that rolled back a value measuring 6% faster).
+        if (ShaderMsPerFrame(s) > 2.0) {
+            ++ev.compile_seconds_skipped;
+            continue;
+        }
         const bool new_value_active = ev.confirm_only || ev.block % 2 == 0;
         if (!new_value_active) {
             ev.slow_streak = 0;
@@ -590,7 +597,11 @@ void CentralBrain::AdvanceEvaluation(std::uint64_t now) {
             const auto cmp = Stats::Compare(ev.a_median, ev.b_median);
             FinishEvaluation(o,
                              F("median %.2f -> %.2f ms (%+.1f%%), p = %.3f", cmp.median_a,
-                               cmp.median_b, cmp.relative_change * 100.0, p),
+                               cmp.median_b, cmp.relative_change * 100.0, p) +
+                                 (ev.compile_seconds_skipped
+                                      ? ", " + std::to_string(ev.compile_seconds_skipped) +
+                                            " shader-compile seconds left out"
+                                      : std::string{}),
                              now);
             return;
         }
@@ -890,6 +901,18 @@ void CentralBrain::RequestMode(Mode m) {
         if (m == Mode::Observe) {
             knobs.ResetLiveToDefaults(clock());
         }
+    });
+}
+
+void CentralBrain::RequestNoteUserSetting(const std::string& knob, std::int64_t value) {
+    std::scoped_lock lk{command_mutex};
+    commands.push_back([this, knob, value] {
+        const KnobState* st = knobs.Find(knob);
+        if (!st || st->spec.scope != Scope::Never) {
+            return;
+        }
+        knobs.Set(knob, value, clock());
+        std::erase_if(recommendations, [&](const Recommendation& r) { return r.knob == knob; });
     });
 }
 

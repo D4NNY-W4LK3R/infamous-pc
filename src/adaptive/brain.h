@@ -171,6 +171,9 @@ public:
     // User controls; thread safe, executed on the next tick.
     void RequestMode(Mode mode);
     void RequestApply(const std::string& knob, std::int64_t value);
+    /// The user changed a user-only setting (e.g. the frame rate limit in F3): record its value
+    /// so the brains reason about it, and drop the recommendation it answers.
+    void RequestNoteUserSetting(const std::string& knob, std::int64_t value);
     void RequestRestoreDefaults();
     void RequestForgetProfile();
 
@@ -203,6 +206,7 @@ private:
         bool confirm_only = false; ///< reapplying a learned value: watch, do not A/B
         std::uint32_t slow_streak = 0;  ///< consecutive slow seconds with the new value
         std::deque<bool> recent_spikes; ///< spike flags of the latest new-value seconds
+        std::uint32_t compile_seconds_skipped = 0; ///< seconds left out: shaders were compiling
         std::string reason;
     };
 

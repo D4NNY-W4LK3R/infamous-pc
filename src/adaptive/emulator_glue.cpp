@@ -16,10 +16,12 @@
 #include "adaptive/emulator_glue.h"
 #include "adaptive/glue_internal.h"
 #include "adaptive/settings.h"
+#include "common/frame_limit.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/scm_rev.h"
 #include "common/thread.h"
+#include "core/emulator_settings.h"
 #include "video_core/renderer_vulkan/vk_pipeline_compiler.h"
 
 #ifdef _WIN32
@@ -195,6 +197,12 @@ void Startup(const std::string& game_serial, const std::string& app_version,
     if (!had_settings) {
         SaveSettings(settings_file, g_settings); // a commented file the user can edit
     }
+    // The frame rate limit is the user's, not the optimizer's: it applies even when the
+    // optimizer is turned off.
+    Common::FrameLimit::Set(g_settings.frame_limit);
+    if (g_settings.frame_limit != 0) {
+        LOG_INFO(Render, "Frame rate limit: {} fps", g_settings.frame_limit);
+    }
     if (!g_settings.enabled) {
         LOG_INFO(Render, "Adaptive optimizer: disabled (the emulator runs with its built-in "
                          "values)");
@@ -225,6 +233,11 @@ void Startup(const std::string& game_serial, const std::string& app_version,
         std::clamp<std::int64_t>(static_cast<std::int64_t>(g_hardware.cpu_logical_cores) - 2,
                                  d.pipeline_workers, 12);
     d.upload_wake_jobs = 8;
+    d.frame_limit = g_settings.frame_limit;
+    {
+        const std::string pm = EmulatorSettings.GetPresentMode();
+        d.present_mode = pm == "Fifo" ? 1 : pm == "Immediate" ? 2 : 0;
+    }
     bool ok = true;
     ok &= g_brain->RegisterMiniBrain(MakeBufferGeometryBrain(d));
     ok &= g_brain->RegisterMiniBrain(
@@ -338,6 +351,38 @@ UserSettings& SettingsForOverlay() {
 
 void SaveSettingsFromOverlay() {
     SaveSettings(g_dir / "settings.ini", g_settings);
+}
+
+std::uint32_t FrameLimit() {
+    return Common::FrameLimit::Get();
+}
+
+void SetFrameLimit(std::uint32_t fps) {
+    if (fps != 0) {
+        fps = std::clamp<std::uint32_t>(fps, 15, 240);
+    }
+    if (fps == Common::FrameLimit::Get() && fps == g_settings.frame_limit) {
+        return;
+    }
+    Common::FrameLimit::Set(fps);
+    if (!g_dir.empty()) {
+        g_settings.frame_limit = fps;
+        SaveSettings(g_dir / "settings.ini", g_settings);
+    } else {
+        // Before a game has started (launcher settings): change only this line of the file.
+        const auto dir = Common::FS::GetUserPath(Common::FS::PathType::UserDir) / "adaptive";
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+        UserSettings s = LoadSettings(dir / "settings.ini",
+                                      [](const std::string&) { return std::nullopt; });
+        s.frame_limit = fps;
+        SaveSettings(dir / "settings.ini", s);
+    }
+    LOG_INFO(Render, "Frame rate limit: {}",
+             fps == 0 ? std::string{"off"} : std::to_string(fps) + " fps");
+    if (g_brain) {
+        g_brain->RequestNoteUserSetting(KnobId::FrameLimit, fps);
+    }
 }
 
 } // namespace Adaptive::Glue

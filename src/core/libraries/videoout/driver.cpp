@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/frame_limit.h"
 #include "common/assert.h"
 #include "common/debug.h"
 #include "common/perf_profiler.h"
@@ -388,7 +389,9 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
                 request_cv.wait_until(lk, wait_end);
                 continue;
             }
-            const auto due = last_flip + vblank_period;
+            const auto due =
+                last_flip + std::max<std::chrono::nanoseconds>(
+                                vblank_period, Common::FrameLimit::MinFrameInterval());
             if (now < due) {
                 request_cv.wait_until(lk, std::min(due, wait_end));
                 continue;
@@ -418,8 +421,13 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         // Check if it's time to take a request.
         auto& vblank_status = main_port.vblank_status;
         if (vblank_status.count % (main_port.flip_rate + 1) == 0) {
+            // With a frame rate limit, a frame waits for its slot; the late-frame path above shows
+            // it on time, so a vblank only takes it once the slot has (nearly) come.
+            const auto limit = Common::FrameLimit::MinFrameInterval();
+            const auto min_interval =
+                limit > vblank_period ? limit - EarlyFlipMargin : min_flip_interval;
             const bool flipped_recently =
-                std::chrono::steady_clock::now() - last_flip < min_flip_interval;
+                std::chrono::steady_clock::now() - last_flip < min_interval;
             const auto request = flipped_recently ? Request{} : receive_request();
             if (!request) {
                 if (timer.GetTotalWait().count() < 0) { // Dont draw too fast

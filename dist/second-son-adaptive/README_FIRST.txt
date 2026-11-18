@@ -54,8 +54,8 @@ CONTROLS (keyboard and mouse)
 THE OPTIMIZER (F1)
   Modes (user\adaptive\settings.ini, or the F1 window):
     observe      measures only, never changes anything
-    manual       (default) measures and recommends; you click "Try it" to test a change
-    automatic    applies safe live changes during gameplay, measures each one in alternating
+    manual       measures and recommends; you click "Try it" to test a change
+    automatic    (default) applies safe live changes during gameplay, measures each one in alternating
                  15-second blocks, keeps only real improvements, undoes regressions at once,
                  and reuses what it learned in earlier sessions
     calibration  as automatic, plus tests ONE start-up setting per launch. For good numbers:
@@ -69,6 +69,19 @@ THE OPTIMIZER (F1)
   Every session writes user\adaptive\latest-report.txt: hardware, decisions, evidence, cost.
   Turn it off completely: enabled = 0 in user\adaptive\settings.ini (then the emulator behaves
   exactly like the plain 4 GB build).
+
+FRAME RATE AND SETTINGS (F3)
+  F3 opens the emulator settings; the mouse pointer is free while it is open and mouse look
+  comes back when it closes. Graphics > "Frame Rate Limit": Off / 30 / 40 / 45 / 60. On a
+  GTX 1650 the game runs at about 30-35 fps; a 30 limit shows every frame for the same time,
+  which feels smoother than an uneven 30-35. It applies at once and is kept in
+  user\adaptive\settings.ini (frame_limit). Keep Present Mode on Mailbox: vsync (Fifo) at 60 Hz
+  makes ~30 fps frames alternate between one and two refreshes.
+
+UPDATING TO A NEW BUILD
+  Extract the new zip over the old folder and keep the "user" folder. It holds your saves, the
+  shader cache (without it every effect stutters once while it is rebuilt), your settings and
+  what the optimizer learned.
 
 TROUBLESHOOTING
   Run COLLECT_DIAGNOSTICS.cmd and look at / send diagnostics.zip.

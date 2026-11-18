@@ -9,11 +9,11 @@
 
 using namespace Adaptive;
 
-TEST(Settings, DefaultsAreManualAndEnabled) {
+TEST(Settings, DefaultsAreAutomaticAndEnabled) {
     const auto s = ParseSettings("");
     EXPECT_TRUE(s.enabled);
     EXPECT_TRUE(s.controls_hint);
-    EXPECT_EQ(s.mode, Mode::Manual);
+    EXPECT_EQ(s.mode, Mode::Automatic);
     EXPECT_TRUE(s.warnings.empty());
 }
 
@@ -48,4 +48,19 @@ TEST(Settings, RoundTripAndEnvironmentOverride) {
     const auto loaded = LoadSettings(dir / "settings.ini", env);
     EXPECT_EQ(loaded.mode, Mode::Observe);
     EXPECT_FALSE(loaded.overlay);
+}
+
+TEST(Settings, FrameLimitParsesRoundTripsAndRejectsNonsense) {
+    EXPECT_EQ(ParseSettings("").frame_limit, 0u);
+    EXPECT_EQ(ParseSettings("frame_limit = 30\n").frame_limit, 30u);
+    const auto bad = ParseSettings("frame_limit = 5\n");
+    EXPECT_EQ(bad.frame_limit, 0u);
+    EXPECT_EQ(bad.warnings.size(), 1u);
+    UserSettings s;
+    s.frame_limit = 45;
+    EXPECT_EQ(ParseSettings(SerializeSettings(s)).frame_limit, 45u);
+    const auto env = [](const std::string& k) -> std::optional<std::string> {
+        return k == "SS_FRAME_LIMIT" ? std::optional<std::string>{"30"} : std::nullopt;
+    };
+    EXPECT_EQ(LoadSettings("/nonexistent/settings.ini", env).frame_limit, 30u);
 }

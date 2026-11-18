@@ -3,12 +3,14 @@
 
 // User configuration of the optimizer: <user dir>/adaptive/settings.ini, plain NAME=VALUE lines.
 //
-//   mode = manual          observe | manual | automatic | calibration
+//   mode = automatic       observe | manual | automatic | calibration (automatic: the player's
+//                          choice of default; every change is still measured and reverted if worse)
 //   enabled = 1            0 turns the whole optimizer off (no thread, no telemetry)
 //   overlay = 1            the F1 optimizer window is available
 //   controls_hint = 1      on-screen keyboard / mouse equivalents of the button prompts (Home)
 //   calibrate_on_battery = 0
 //   tick_ms = 1000
+//   frame_limit = 0        most frames per second shown (0 = no limit; F3 > Graphics)
 //
 // Environment variables win over the file (SS_ADAPTIVE_MODE, SS_ADAPTIVE=0). The overlay writes
 // the file back when the user changes the mode, so the choice is remembered.
@@ -28,11 +30,12 @@ namespace Adaptive {
 
 struct UserSettings {
     bool enabled = true;
-    Mode mode = Mode::Manual;
+    Mode mode = Mode::Automatic;
     bool overlay = true;
     bool controls_hint = true; ///< keyboard / mouse equivalents of the button prompts (Home)
     bool calibrate_on_battery = false;
     std::uint32_t tick_ms = 1000;
+    std::uint32_t frame_limit = 0; ///< frames per second shown at most; 0 = no limit
     std::vector<std::string> warnings; ///< unknown keys, bad values (not fatal)
 };
 

@@ -56,8 +56,8 @@ touched). Defaults are the emulator's own built-in values.
 | Mode | Changes anything? |
 |---|---|
 | observe | never |
-| manual (default) | only what the user clicks; still measured A/B and reverted if worse |
-| automatic | live knobs during steady gameplay; reuses learned values |
+| manual | only what the user clicks; still measured A/B and reverted if worse |
+| automatic (default, the player's choice) | live knobs during steady gameplay; reuses learned values |
 | calibration | automatic + one start-up experiment per launch, measured on idle seconds |
 
 ## How a change is judged

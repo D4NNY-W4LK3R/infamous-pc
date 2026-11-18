@@ -114,6 +114,11 @@ private:
                                                             "Fullscreen (Borderless)"};
     const std::vector<std::string> audioBackendOptions = {"SDL", "OpenAL"};
     const std::vector<std::string> presentModeOptions = {"Mailbox", "Fifo", "Immediate"};
+    // Frame rate limit (Second Son Adaptive): a value from settings.ini that is not in the list
+    // is added to it, so saving never changes it behind the user's back.
+    std::vector<std::string> frameLimitOptions = {"Off", "30", "40", "45", "60"};
+    std::vector<u32> frameLimitValues = {0, 30, 40, 45, 60};
+    int frameLimitSetting = 0;
     const std::vector<std::string> hideCursorOptions = {"Never", "Idle", "Always"};
     const std::vector<std::string> trophySideOptions = {"left", "right", "top", "bottom"};
     const std::vector<std::string> readbacksModeOptions = {"Disabled", "Relaxed", "Precise"};

@@ -75,6 +75,11 @@ inline void NoteInput() {
 /// Emulator::Shutdown: judges this launch, saves what was learned, writes the report.
 void Shutdown();
 
+/// Frame rate limit (F3 settings > Graphics): 0 = off. Applies at once and is saved to
+/// user/adaptive/settings.ini.
+std::uint32_t FrameLimit();
+void SetFrameLimit(std::uint32_t fps);
+
 /// Toggles the F9 status window (drawn by the ImGui layer registered at startup).
 void ToggleOverlay();
 /// Registers the overlay layer; called by the presenter after ImGui is up.

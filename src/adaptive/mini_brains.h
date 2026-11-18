@@ -31,6 +31,7 @@ struct EmulatorDefaults {
     std::int64_t pipeline_workers = 4;
     std::int64_t pipeline_workers_max = 12; ///< logical cores - 2, at most 12
     std::int64_t present_mode = 0;          ///< 0 Mailbox, 1 Fifo, 2 Immediate (settings)
+    std::int64_t frame_limit = 0;           ///< fps shown at most, 0 = off (F3 > Graphics)
     bool has_live_texture_gc = true;
     bool has_live_upload_wake = true;
 };
@@ -88,6 +89,7 @@ inline constexpr const char* PipelineWorkers = "SS_PIPELINE_WORKERS";
 inline constexpr const char* UploadWakeJobs = "SS_UPLOAD_WAKE_JOBS";
 inline constexpr const char* TextureGcHeadroomMb = "SS_TEXCACHE_GC_HEADROOM_MB";
 inline constexpr const char* PresentMode = "SS_PRESENT_MODE";
+inline constexpr const char* FrameLimit = "SS_FRAME_LIMIT";
 inline constexpr const char* AsyncCompute = "SHADPS4_ASYNC_COMPUTE";
 } // namespace KnobId
 

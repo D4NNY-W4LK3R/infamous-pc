@@ -124,10 +124,19 @@ TEST(MiniBrains, FramePacingOnlyRecommendsUserSettings) {
         EXPECT_EQ(k.scope, Scope::Never);
     }
     Snapshot s = Steady(Bottleneck::GuestBound);
-    s.frame_ms_p99 = 80.0;
-    const auto p = b->Think(s, Defaults(*b));
+    s.frame_ms_p50 = 16.0; // a fast game with uneven frames: vsync
+    s.frame_ms_p99 = 40.0;
+    auto p = b->Think(s, Defaults(*b));
     ASSERT_EQ(p.size(), 1u);
+    EXPECT_EQ(p[0].knob, KnobId::PresentMode);
     EXPECT_EQ(p[0].value, 1);
+    // ~30 fps with uneven frames (the GTX 1650 case): a 30 fps limit, never vsync at 60 Hz.
+    s.frame_ms_p50 = 31.0;
+    s.frame_ms_p99 = 56.0;
+    p = b->Think(s, Defaults(*b));
+    ASSERT_EQ(p.size(), 1u);
+    EXPECT_EQ(p[0].knob, KnobId::FrameLimit);
+    EXPECT_EQ(p[0].value, 30);
 }
 
 TEST(MiniBrains, QuietWhenNotInGameplay) {

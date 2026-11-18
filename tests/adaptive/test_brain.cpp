@@ -42,6 +42,8 @@ struct World {
     std::function<double(World&)> spike = [](World&) { return 0.0; };
     StallKind dominant = StallKind::Residency;
     double dominant_ms = 8.0;
+    /// extra per-frame changes (e.g. a shader-compile stall); returns extra frame time in ms
+    std::function<double(World&, FrameSample&)> decorate = [](World&, FrameSample&) { return 0.0; };
 
     HardwareInfo Hw() const {
         HardwareInfo hw;
@@ -71,13 +73,15 @@ struct World {
         std::normal_distribution<double> noise(0.0, 0.6);
         for (int s = 0; s < seconds; ++s) {
             for (int i = 0; i < 30; ++i) {
-                const double ms = std::max(5.0, frame_ms(*this) + noise(rng) + spike(*this));
-                now += static_cast<std::uint64_t>(ms * 1e6);
                 FrameSample f;
+                f.stall_ms[static_cast<std::size_t>(dominant)] = static_cast<float>(dominant_ms);
+                const double extra = decorate(*this, f);
+                const double ms =
+                    std::max(5.0, frame_ms(*this) + noise(rng) + spike(*this) + extra);
+                now += static_cast<std::uint64_t>(ms * 1e6);
                 f.frame_index = frame++;
                 f.timestamp_ns = now;
                 f.frame_ms = static_cast<float>(ms);
-                f.stall_ms[static_cast<std::size_t>(dominant)] = static_cast<float>(dominant_ms);
                 brain.PublishFrame(f);
             }
             brain.Tick();
@@ -275,6 +279,39 @@ TEST(Brain, OneHitchDuringATestIsNotAnEmergency) {
     Rig rig(w, dir, Mode::Automatic);
     rig.Start();
     w.Seconds(*rig.brain, 260);
+    EXPECT_FALSE(rig.brain->Status().kill_switch);
+    rig.brain->Shutdown();
+    const Profile p = LoadProfile(dir);
+    ASSERT_NE(first_new_frame, 0u) << "the test never started";
+    EXPECT_FALSE(p.rejected.contains(KnobId::TextureGcHeadroomMb));
+    EXPECT_EQ(p.validated.at(KnobId::TextureGcHeadroomMb), 256);
+}
+
+TEST(Brain, ShaderCompileStallsDuringATestAreLeftOut) {
+    // Field case (build 16, fresh shader cache): compile stalls of 0.3-0.9 s during the test of
+    // a value measuring 6% faster rolled it back twice and blocked it.
+    World w;
+    w.frame_ms = [](World& x) { return x.tex_headroom.load() >= 256 ? 30.5 : 33.3; };
+    std::uint64_t first_new_frame = 0;
+    w.decorate = [&first_new_frame](World& x, FrameSample& f) {
+        if (x.tex_headroom.load() >= 256 && first_new_frame == 0) {
+            first_new_frame = x.frame;
+        }
+        if (first_new_frame == 0) {
+            return 0.0;
+        }
+        // Two bursts of 60 ms frames that wait 40 ms for pipelines, a few seconds each.
+        const std::uint64_t n = x.frame - first_new_frame;
+        if ((n >= 90 && n < 210) || (n >= 900 && n < 1020)) {
+            f.stall_ms[static_cast<std::size_t>(StallKind::PipelineWait)] = 40.0f;
+            return 27.0;
+        }
+        return 0.0;
+    };
+    const auto dir = TempDir("compile-stalls");
+    Rig rig(w, dir, Mode::Automatic);
+    rig.Start();
+    w.Seconds(*rig.brain, 300);
     EXPECT_FALSE(rig.brain->Status().kill_switch);
     rig.brain->Shutdown();
     const Profile p = LoadProfile(dir);

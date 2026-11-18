@@ -23,5 +23,7 @@ private:
 };
 
 void OpenInGameSettingsDialog();
+/// True while the F3 settings window is open (it needs a free mouse pointer).
+bool IsInGameSettingsDialogOpen();
 
 }; // namespace  ImGuiEmuSettings

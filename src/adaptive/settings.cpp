@@ -84,6 +84,14 @@ UserSettings ParseSettings(const std::string& text) {
                 continue;
             }
             s.tick_ms = v;
+        } else if (key == "frame_limit") {
+            std::uint32_t v = 0;
+            const auto r = std::from_chars(value.data(), value.data() + value.size(), v);
+            if (r.ec != std::errc{} || (v != 0 && (v < 15 || v > 240))) {
+                s.warnings.push_back("frame_limit must be 0 (no limit) or 15..240");
+                continue;
+            }
+            s.frame_limit = v;
         } else {
             s.warnings.push_back("unknown setting '" + key + "'");
         }
@@ -104,6 +112,8 @@ std::string SerializeSettings(const UserSettings& s) {
     o << "controls_hint = " << (s.controls_hint ? 1 : 0) << '\n';
     o << "calibrate_on_battery = " << (s.calibrate_on_battery ? 1 : 0) << '\n';
     o << "tick_ms = " << s.tick_ms << '\n';
+    o << "# most frames per second shown; 0 = no limit (F3 settings > Graphics)\n";
+    o << "frame_limit = " << s.frame_limit << '\n';
     return o.str();
 }
 
@@ -118,6 +128,15 @@ UserSettings LoadSettings(const std::filesystem::path& file,
     if (const auto v = env("SS_ADAPTIVE")) {
         if (const auto b = ParseBool(*v)) {
             s.enabled = *b;
+        }
+    }
+    if (const auto v = env("SS_FRAME_LIMIT")) {
+        std::uint32_t f = 0;
+        const auto r = std::from_chars(v->data(), v->data() + v->size(), f);
+        if (r.ec == std::errc{} && (f == 0 || (f >= 15 && f <= 240))) {
+            s.frame_limit = f;
+        } else {
+            s.warnings.push_back("SS_FRAME_LIMIT '" + *v + "' must be 0 or 15..240");
         }
     }
     if (const auto v = env("SS_ADAPTIVE_MODE")) {

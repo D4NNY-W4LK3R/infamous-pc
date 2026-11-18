@@ -24,6 +24,7 @@
 #include "core/libraries/system/userservice.h"
 #include "core/mouse_aim.h"
 #include "core/user_settings.h"
+#include "imgui/big_picture/settings_dialog_layer.h"
 #include "imgui/friends_layer.h"
 #include "imgui/controls_hint_layer.h"
 #include "imgui/notice_layer.h"
@@ -225,6 +226,37 @@ void WindowSDL::SetIcon(std::span<const u8> png_data) {
     SetWindowIcon(window, std::vector<u8>(png_data.begin(), png_data.end()));
 }
 
+namespace {
+
+/// The F3 settings window needs a pointer: while it is open the mouse is released (no mouse look,
+/// no stick, visible cursor) and afterwards it goes back to the mode it was in.
+void HandMouseToDialogs(SDL_Window* window) {
+    static bool dialog_had_mouse = false;
+    static Input::MouseMode before = Input::MouseMode::Off;
+    const bool dialog = ImGuiEmuSettings::IsInGameSettingsDialogOpen();
+    if (dialog == dialog_had_mouse) {
+        return;
+    }
+    dialog_had_mouse = dialog;
+    if (dialog) {
+        before = Input::GetMouseMode();
+        if (before != Input::MouseMode::Off) {
+            Input::ToggleMouseModeTo(before); // the same mode again turns it off
+        }
+        SDL_SetWindowRelativeMouseMode(window, false);
+        SDL_ShowCursor();
+        return;
+    }
+    if (before != Input::MouseMode::Off && Input::GetMouseMode() == Input::MouseMode::Off) {
+        Input::ToggleMouseModeTo(before);
+    }
+    const auto now = Input::GetMouseMode();
+    SDL_SetWindowRelativeMouseMode(window, now == Input::MouseMode::Joystick ||
+                                               now == Input::MouseMode::Gyro);
+}
+
+} // namespace
+
 void WindowSDL::WaitEvent() {
     // Called on main thread
     SDL_Event event;
@@ -232,6 +264,7 @@ void WindowSDL::WaitEvent() {
     if (!SDL_WaitEvent(&event)) {
         return;
     }
+    HandMouseToDialogs(window);
 
     if (Libraries::Mouse::PushSDLEvent(event) || Libraries::Keyboard::PushSDLEvent(event)) {
         return;

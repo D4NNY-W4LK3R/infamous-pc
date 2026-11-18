@@ -5,7 +5,7 @@ files and your hands. Tick each one, then run COLLECT_DIAGNOSTICS.cmd and keep d
 Every line in quotes is text to look for in user\log\shad_log.txt (or CUSA00223.log).
 
 A. STARTS AND RUNS LIKE THE 4 GB BUILD (baseline preserved)
-  [ ] A1  The game boots to the title screen. Log has "Adaptive optimizer: mode manual".
+  [ ] A1  The game boots to the title screen. Log has "Adaptive optimizer: mode automatic".
   [ ] A2  Load a save, play 5 minutes in the open city. No new crash or graphics problem
           compared with plain infamous-pc 1.1.0 on this PC.
   [ ] A3  Log has "Texture cache: memory budget ... MB" (the 4 GB memory handling is active).
@@ -34,7 +34,7 @@ B. NATIVE MOUSE AND KEYBOARD
 C. OPTIMIZER - SAFE BY DEFAULT
   [ ] C1  F1 opens the optimizer window; it shows FPS, frame times, VRAM, "Limit: ..." and the
           mouse camera state.
-  [ ] C2  In Manual mode nothing changes by itself: "Values in effect" stay at their defaults.
+  [ ] C2  In Manual mode (F1 window) nothing changes by itself: "Values in effect" stay at their defaults.
   [ ] C3  Quit normally. user\adaptive\latest-report.txt exists and lists your CPU, RAM and
           "NVIDIA GeForce GTX 1650" with the driver version.
 

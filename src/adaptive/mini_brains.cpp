@@ -304,7 +304,10 @@ public:
         : KnobBrain(Domain::FramePacing, "Rendering & Frame Pacing",
                     {KnobSpec{KnobId::PresentMode, Domain::FramePacing, Scope::Never,
                               d.present_mode, 0, 2, {0, 1, 2}, "0 Mailbox / 1 Fifo / 2 Immediate",
-                              "swapchain present mode (emulator setting)"}}) {}
+                              "swapchain present mode (emulator setting)"},
+                     KnobSpec{KnobId::FrameLimit, Domain::FramePacing, Scope::Never,
+                              d.frame_limit, 0, 240, {0, 30, 40, 45, 60}, "fps, 0 = off",
+                              "frame rate limit (F3 settings > Graphics)"}}) {}
 
     std::vector<Proposal> Think(const Snapshot& s, const std::vector<std::int64_t>& v) override {
         const double frame_wait = Stall(s, StallKind::FrameWait);
@@ -316,8 +319,21 @@ public:
         if (!s.in_gameplay) {
             return out;
         }
-        // Uneven pacing while presentation is not the limit: Fifo paces frames evenly.
-        if (ratio > 1.8 && frame_wait < 0.5 && v[0] != 1 &&
+        // Uneven pacing below ~45 fps: the game cannot keep up with a 60 Hz display, and vsync
+        // (Fifo) would make frames alternate between one and two refreshes. A 30 fps limit shows
+        // every frame for the same time instead (field data: GTX 1650, 30-35 fps, p99 1.8x).
+        const bool slow = s.frame_ms_p50 > 22.0;
+        if (ratio > 1.8 && slow && (v[1] == 0 || v[1] > 30)) {
+            out.push_back(Propose(1, 30,
+                                  Fmt("frame times are uneven (p99 %.2fx the median) at %.0f fps; "
+                                      "a 30 fps limit (F3 > Graphics) shows every frame for the "
+                                      "same time",
+                                      ratio, 1000.0 / s.frame_ms_p50),
+                                  0.1));
+        }
+        // Uneven pacing at higher rates while presentation is not the limit: Fifo paces frames
+        // evenly.
+        if (ratio > 1.8 && !slow && frame_wait < 0.5 && v[0] != 1 &&
             s.bottleneck != Bottleneck::PresentBound) {
             out.push_back(Propose(0, 1,
                                   Fmt("frame times are uneven (p99 %.2fx the median); Fifo "
