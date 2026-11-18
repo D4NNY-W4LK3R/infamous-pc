@@ -1,0 +1,8 @@
+
+# Second Son Adaptive: Windows scripts keep CRLF in checkouts and packages.
+dist/second-son-adaptive/*.cmd text eol=crlf
+dist/second-son-adaptive/*.txt text eol=crlf
+tools/builder/*.cmd text eol=crlf
+tools/builder/*.ps1 text eol=crlf
+tools/builder/*.txt text eol=crlf
+tools/builder/*.sh text eol=lf

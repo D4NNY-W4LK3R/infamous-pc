@@ -1,0 +1,68 @@
+SECOND SON ADAPTIVE - inFAMOUS Second Son on PC
+4 GB VRAM build (infamous-pc 1.1.0) + native mouse and keyboard + self-tuning optimizer
+==========================================================================================
+
+You need your own dump of the game (base + update 1.07 merged, the folder with eboot.bin) and
+your PS4 system modules, exactly as for infamous-pc. No game files are included.
+
+INSTALL
+  1. Extract this zip to a folder on E:, for example  E:\SecondSonAdaptive\Game
+     Everything the emulator writes (saves, settings, shader cache, logs, what the optimizer
+     learns) goes into the "user" folder next to shadPS4.exe - nothing on C:.
+  2. If Windows says VCRUNTIME140.dll is missing, install the Visual C++ Redistributable
+     2015-2022 x64 once: https://aka.ms/vs/17/release/vc_redist.x64.exe
+  3. Put your PS4 system modules in user\sys_modules (create the folders if needed).
+     Moving over from infamous-pc? Copy the contents of its data folder (its "user" folder, or
+     %APPDATA%\shadPS4) into the new "user" folder instead: that brings sys_modules, saves and
+     the shader cache along.
+  4. Double-click PLAY_SECOND_SON.cmd and paste your game folder the first time.
+  5. The first start compiles shaders: expect stutter once. Keep user\cache.
+
+CONTROLS (keyboard and mouse)
+  Mouse                look around (true 1:1 mouse look; F7 captures / releases the mouse)
+  Left / right button  shoot (R2) / aim (L2)          - and =   mouse speed down / up
+  W A S D              move          Space  jump (X)        Left Shift  dash (O)
+  C                    melee (Square)                 F       Karmic / interact (Triangle)
+  Q / E                special (L1) / heavy (R1)       U / O   L3 / R3
+  R / Y                touchpad left / right           Tab     touchpad press
+  Enter or Esc         pause (Options)                 Arrows  D-pad
+  G / H                tilt the controller left / right (spray can)     T  shake
+  Delete               mouse = touchpad (fingerprint scanners); press again to go back
+  F6                   mouse = motion sensor           F1      optimizer window
+  F10 FPS counter      F11 fullscreen      F12 screenshot      F9 pause the emulator
+  A DualSense / DualShock 4 / Xbox pad works at the same time.
+  The layout lives in user\input_config\CUSA00223.ini (or CUSA00004.ini) - edit freely; it is
+  only written when it does not exist yet.
+
+  Mouse look needs a recognized game executable. The log says either
+     "Mouse aim: camera hook at ..."          -> true mouse look is on
+     "Mouse aim: camera hook NOT installed"   -> your eboot is a build whose code was never
+                                                 measured; the mouse then moves the right stick
+  The F1 window shows the same status. The hook is never forced onto an unknown build.
+
+THE OPTIMIZER (F1)
+  Modes (user\adaptive\settings.ini, or the F1 window):
+    observe      measures only, never changes anything
+    manual       (default) measures and recommends; you click "Try it" to test a change
+    automatic    applies safe live changes during gameplay, measures each one in alternating
+                 15-second blocks, keeps only real improvements, undoes regressions at once,
+                 and reuses what it learned in earlier sessions
+    calibration  as automatic, plus tests ONE start-up setting per launch. For good numbers:
+                 start the game, let it reach the title screen, then do not touch anything
+                 for 2 minutes. Quit normally (close the window) afterwards.
+  What it never does: change graphics settings, the frame-rate / vblank setting, async compute
+  or present mode on its own (those are only recommended), override a value you set yourself
+  in the environment, or keep a change it could not measure as a win.
+  It forgets / re-checks learned values by itself when the GPU driver, the game build or the
+  emulator build changes. "Forget what was learned" in F1 starts over.
+  Every session writes user\adaptive\latest-report.txt: hardware, decisions, evidence, cost.
+  Turn it off completely: enabled = 0 in user\adaptive\settings.ini (then the emulator behaves
+  exactly like the plain 4 GB build).
+
+TROUBLESHOOTING
+  Run COLLECT_DIAGNOSTICS.cmd and look at / send diagnostics.zip.
+  Back to the plain 4 GB behaviour for one run: set SS_ADAPTIVE=0 and SHADPS4_MOUSE_AIM=0
+  before starting, or use the original infamous-pc build - this build never touches its files.
+
+Built from pinned sources (SOURCE_PINS.txt); SHA256.txt has the executable's hash.
+GPL-2.0-or-later. Not affiliated with Sony Interactive Entertainment or Sucker Punch.

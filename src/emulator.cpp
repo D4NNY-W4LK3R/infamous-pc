@@ -436,6 +436,17 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     }
 
     EmulatorSettings.Load(id);
+    // inFAMOUS Second Son: the per-game settings the 4 GB build's launcher installs (+512 MB
+    // direct memory; precise readbacks, direct memory access and the pipeline cache are already
+    // the defaults), written once and only when the player has no config for the game yet.
+    if ((id == "CUSA00223" || id == "CUSA00004") &&
+        !std::filesystem::exists(Common::FS::GetUserPath(Common::FS::PathType::CustomConfigs) /
+                                 (id + ".json"))) {
+        EmulatorSettings.SetExtraDmemInMBytes(512, true);
+        if (EmulatorSettings.Save(id)) {
+            LOG_INFO(Config, "Wrote the recommended per-game settings for {}", id);
+        }
+    }
     // Switch to configured log
     Common::Log::Switch((!id.empty() && EmulatorSettings.IsLogSeparate()) ? id + ".log"
                                                                           : "shad_log.txt",
