@@ -12,6 +12,7 @@ using namespace Adaptive;
 TEST(Settings, DefaultsAreManualAndEnabled) {
     const auto s = ParseSettings("");
     EXPECT_TRUE(s.enabled);
+    EXPECT_TRUE(s.controls_hint);
     EXPECT_EQ(s.mode, Mode::Manual);
     EXPECT_TRUE(s.warnings.empty());
 }
@@ -29,7 +30,9 @@ TEST(Settings, RoundTripAndEnvironmentOverride) {
     UserSettings s;
     s.mode = Mode::Calibration;
     s.overlay = false;
+    s.controls_hint = false;
     const auto back = ParseSettings(SerializeSettings(s));
+    EXPECT_FALSE(back.controls_hint);
     EXPECT_EQ(back.mode, Mode::Calibration);
     EXPECT_FALSE(back.overlay);
 

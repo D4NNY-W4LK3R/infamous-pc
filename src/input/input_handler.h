@@ -58,6 +58,7 @@
 #define SDL_EVENT_SCREENSHOT_WITH_OVERLAYS SDL_EVENT_USER + 14
 #define SDL_EVENT_TOGGLE_FRIENDS SDL_EVENT_USER + 15
 #define SDL_EVENT_TOGGLE_ADAPTIVE_OVERLAY SDL_EVENT_USER + 16
+#define SDL_EVENT_TOGGLE_CONTROLS_HINT SDL_EVENT_USER + 17
 
 #define LEFTJOYSTICK_HALFMODE 0x00010000
 #define RIGHTJOYSTICK_HALFMODE 0x00020000
@@ -86,6 +87,7 @@
 #define HOTKEY_OPEN_EMULATOR_SETTINGS 0xf000000f
 #define HOTKEY_TOGGLE_FRIENDS 0xf0000010
 #define HOTKEY_ADAPTIVE_OVERLAY 0xf0000011
+#define HOTKEY_CONTROLS_HINT 0xf0000012
 
 #define SDL_UNMAPPED UINT32_MAX - 1
 
@@ -208,6 +210,7 @@ const std::map<std::string, u32> string_to_hotkey_map = {
     {"hotkey_emulator_settings", HOTKEY_OPEN_EMULATOR_SETTINGS},
     {"hotkey_toggle_friends", HOTKEY_TOGGLE_FRIENDS},
     {"hotkey_adaptive_overlay", HOTKEY_ADAPTIVE_OVERLAY},
+    {"hotkey_controls_hint", HOTKEY_CONTROLS_HINT},
 };
 
 const std::map<std::string, AxisMapping> string_to_axis_map = {
@@ -391,6 +394,14 @@ enum class EmuKey : u8 {
 };
 /// The SDL keycode bound to an emulator key; 0 = none.
 u32 GetEmuKey(EmuKey key);
+
+/// One line of the on-screen controls hint: the pad output and the keys / buttons bound to it.
+struct BindingHint {
+    std::string pad;  ///< e.g. "Cross"
+    std::string keys; ///< e.g. "Space"
+};
+/// Keyboard / mouse bindings of the active config, for the controls hint (thread safe copy).
+std::vector<BindingHint> GetKeyboardHints();
 
 void ParseInputConfig(const std::string game_id);
 
@@ -583,7 +594,7 @@ public:
 
 class ControllerAllOutputs {
 public:
-    static constexpr u64 output_count = 56;
+    static constexpr u64 output_count = 58;
     std::array<ControllerOutput, output_count> data = {
         // Important: these have to be the first, or else they will update in the wrong order
         ControllerOutput(LEFTJOYSTICK_HALFMODE),
@@ -654,6 +665,8 @@ public:
         ControllerOutput(HOTKEY_VOLUME_DOWN),
         ControllerOutput(HOTKEY_OPEN_EMULATOR_SETTINGS),
         ControllerOutput(HOTKEY_TOGGLE_FRIENDS),
+        ControllerOutput(HOTKEY_ADAPTIVE_OVERLAY),
+        ControllerOutput(HOTKEY_CONTROLS_HINT),
 
         ControllerOutput(SDL_GAMEPAD_BUTTON_INVALID, SDL_GAMEPAD_AXIS_INVALID),
     };

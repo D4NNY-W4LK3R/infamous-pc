@@ -19,7 +19,13 @@ INSTALL
   5. The first start compiles shaders: expect stutter once. Keep user\cache.
 
 CONTROLS (keyboard and mouse)
-  Mouse                look around (true 1:1 mouse look; F7 captures / releases the mouse)
+  The game keeps its PlayStation button prompts; the panel at the bottom left shows the key
+  for each of them (Home shows / hides it). It reads your real bindings, so it stays right
+  after you change keys (F8 reloads the bindings).
+  Mouse                in gameplay: true 1:1 mouse look. Wherever the game's normal camera is
+                       not running (spray painting, menus, special scenes) the mouse drives the
+                       right stick AND the motion sensor, so the spray can's pointer follows it.
+                       F7 captures / releases the mouse.
   Left / right button  shoot (R2) / aim (L2)          - and =   mouse speed down / up
   W A S D              move          Space  jump (X)        Left Shift  dash (O)
   C                    melee (Square)                 F       Karmic / interact (Triangle)
@@ -28,14 +34,17 @@ CONTROLS (keyboard and mouse)
   Enter or Esc         pause (Options)                 Arrows  D-pad
   G / H                tilt the controller left / right (spray can)     T  shake
   Delete               mouse = touchpad (fingerprint scanners); press again to go back
-  F6                   mouse = motion sensor           F1      optimizer window
+  F6                   mouse = motion sensor only      F1      optimizer window
+  Home                 show / hide the key panel
   F10 FPS counter      F11 fullscreen      F12 screenshot      F9 pause the emulator
   A DualSense / DualShock 4 / Xbox pad works at the same time.
-  The layout lives in user\input_config\CUSA00223.ini (or CUSA00004.ini) - edit freely; it is
-  only written when it does not exist yet.
+  The layout lives in user\input_config\CUSA00004.ini (EU) or CUSA00223.ini (US) - edit freely;
+  it is only written when it does not exist yet. Second Son always uses this file, even if the
+  emulator is set to share one input config between games.
 
   Mouse look needs a recognized game executable. The log says either
-     "Mouse aim: camera hook at ..."          -> true mouse look is on
+     "Mouse aim: camera hook at ..."          -> true mouse look is available; "gameplay camera
+                                                 live" appears once you walk around freely
      "Mouse aim: camera hook NOT installed"   -> your eboot is a build whose code was never
                                                  measured; the mouse then moves the right stick
   The F1 window shows the same status. The hook is never forced onto an unknown build.

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "adaptive/emulator_glue.h"
+#include "imgui/controls_hint_layer.h"
 #include "imgui/notice_layer.h"
 #include "common/debug.h"
 #include "common/elf_info.h"
@@ -503,6 +504,7 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
     ImGui::ShadNetNotify::Register();
     ImGui::InvitationPrompt::Register();
     Overlay::Notice::Register();
+    Overlay::ControlsHint::Register();
     Adaptive::Glue::RegisterOverlay();
 }
 

@@ -27,6 +27,8 @@ bool mouse_gyro_roll_mode = false;
 Uint32 mouse_polling_id = 0;
 MouseMode mouse_mode = MouseMode::Off;
 bool g_mouse_aim_clicks = false;
+/// The mouse turns the emulated motion sensor while the camera hook is idle (EmulateJoystick).
+static bool g_motion_from_mouse = false;
 
 // Switches mouse to a set mode or turns mouse emulation off if it was already in that mode.
 // Returns whether the mode is turned on.
@@ -71,12 +73,31 @@ void SetMouseGyroRollMode(bool mode) {
 }
 
 void EmulateJoystick(GameController* controller, u32 interval) {
-    if (MouseAimActive()) {
-        // Native mouse camera: the mouse turns the camera itself (sdl_window.cpp); drain SDL's
-        // relative motion so another mouse mode does not start with one big jump.
-        float dx = 0, dy = 0;
-        SDL_GetRelativeMouseState(&dx, &dy);
-        return;
+    float d_x = 0, d_y = 0;
+    SDL_GetRelativeMouseState(&d_x, &d_y);
+
+    // inFAMOUS Second Son (native mouse camera build): the mouse always does something useful.
+    //  - gameplay camera live and the hook installed: the hook turns the camera 1:1 (sdl_window);
+    //  - otherwise (spray can, menus, cut-scenes, or a game build the hook does not know): the
+    //    mouse drives the right stick AND turns the emulated motion sensor, so the spray can's
+    //    pointer follows the mouse and the camera still moves if the hook cannot.
+    bool& motion_from_mouse = g_motion_from_mouse;
+    const bool second_son = Core::MouseAim::Enabled();
+    if (second_son && mouse_joystick_binding != 1) {
+        const bool hook_drives_camera = Core::MouseAim::Installed() && Core::MouseAim::CameraLive();
+        if (hook_drives_camera) {
+            if (motion_from_mouse) {
+                constexpr float no_rotation[3] = {0.0f, 0.0f, 0.0f};
+                controller->SetEmulatedRotationRate(no_rotation);
+                controller->Axis(Axis::RightX, GetAxis(-0x80, 0x7f, 0), false);
+                controller->Axis(Axis::RightY, GetAxis(-0x80, 0x7f, 0), false);
+                motion_from_mouse = false;
+            }
+            return;
+        }
+        float gyro_from_mouse[3] = {-d_y / 100, -d_x / 100, 0.0f};
+        controller->SetEmulatedRotationRate(gyro_from_mouse);
+        motion_from_mouse = true;
     }
 
     Axis axis_x, axis_y;
@@ -90,11 +111,13 @@ void EmulateJoystick(GameController* controller, u32 interval) {
         axis_y = Axis::RightY;
         break;
     default:
-        return; // no update needed
+        if (!second_son) {
+            return; // no update needed
+        }
+        axis_x = Axis::RightX; // Second Son: the camera stick unless the config says otherwise
+        axis_y = Axis::RightY;
+        break;
     }
-
-    float d_x = 0, d_y = 0;
-    SDL_GetRelativeMouseState(&d_x, &d_y);
 
     float output_speed =
         SDL_clamp(sqrt(d_x * d_x + d_y * d_y) * mouse_speed + mouse_speed_offset * 128,
@@ -111,7 +134,6 @@ void EmulateJoystick(GameController* controller, u32 interval) {
         controller->Axis(axis_y, GetAxis(-0x80, 0x7f, 0), false);
     }
 }
-
 void EmulateGyro(GameController* controller, u32 interval) {
     float d_x = 0, d_y = 0;
     SDL_GetRelativeMouseState(&d_x, &d_y);
@@ -182,6 +204,14 @@ Uint32 MousePolling(void* param, Uint32 id, Uint32 interval) {
         controller->SetEmulatedRotationRate(no_rotation);
     }
     was_gyro = mouse_mode == MouseMode::Gyro;
+    if (g_motion_from_mouse && mouse_mode != MouseMode::Joystick) {
+        // Mouse released (F7) or another mode: stop turning the controller.
+        if (mouse_mode != MouseMode::Gyro) {
+            constexpr float no_rotation[3] = {0.0f, 0.0f, 0.0f};
+            controller->SetEmulatedRotationRate(no_rotation);
+        }
+        g_motion_from_mouse = false;
+    }
     switch (mouse_mode) {
     case MouseMode::Joystick:
         EmulateJoystick(controller, interval);

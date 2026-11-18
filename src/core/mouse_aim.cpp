@@ -155,7 +155,16 @@ bool Enabled() {
 
 std::string StatusText() {
     std::scoped_lock lk{g_status_mutex};
+    if (Installed()) {
+        return g_status + (g_live.load(std::memory_order_relaxed)
+                               ? " | camera live: mouse turns the camera"
+                               : " | camera idle: mouse drives the right stick + motion sensor");
+    }
     return g_status;
+}
+
+bool CameraLive() {
+    return g_live.load(std::memory_order_relaxed);
 }
 
 bool Installed() {
@@ -331,7 +340,12 @@ void Tick() {
     }
     if (live != g_live.load(std::memory_order_relaxed)) {
         g_live.store(live, std::memory_order_relaxed);
-        LOG_DEBUG(Core, "Mouse aim: camera {}", live ? "live" : "idle");
+        static int logged = 0;
+        if (logged < 20) { // enough to see the pattern in a log, not a flood
+            ++logged;
+            LOG_INFO(Core, "Mouse aim: gameplay camera {}", live ? "live (mouse look)"
+                                                              : "idle (mouse = stick + motion)");
+        }
     }
 }
 

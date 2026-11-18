@@ -147,6 +147,11 @@ bool CentralBrain::RegisterMiniBrain(std::unique_ptr<MiniBrain> brain,
     return true;
 }
 
+void CentralBrain::SetRendererGpu(const GpuInfo& gpu) {
+    std::scoped_lock lk{renderer_gpu_mutex};
+    renderer_gpu = gpu;
+}
+
 void CentralBrain::SetResourceSampler(ResourceSampler s) {
     sampler = std::move(s);
 }
@@ -1110,7 +1115,16 @@ std::string CentralBrain::BuildReport() const {
     o << "Architecture v1.0, contract " << ContractVersionMajor << '.' << ContractVersionMinor
       << ", knowledge schema " << KnowledgeSchemaVersion << "\n\n";
     o << "== Mode: " << ToString(mode) << "\n\n";
-    o << "== Hardware\n" << Describe(hardware) << '\n';
+    {
+        HardwareInfo shown = hardware;
+        std::scoped_lock lk{renderer_gpu_mutex};
+        if (renderer_gpu) {
+            const std::string windows_driver = shown.gpu.driver_version;
+            shown.gpu = *renderer_gpu;
+            shown.gpu.driver_version += " (Windows " + windows_driver + ")";
+        }
+        o << "== Hardware\n" << Describe(shown) << '\n';
+    }
     o << "== Software\nemulator " << software.emulator_build << "\ngame " << software.game_serial
       << ' ' << software.game_version << " (eboot " << software.eboot_signature << ")\n\n";
     o << "== Profile " << profile_key << "\n";

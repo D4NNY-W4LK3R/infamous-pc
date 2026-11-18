@@ -4,6 +4,8 @@
 #include "input_handler.h"
 
 #include <algorithm>
+#include <cctype>
+#include <mutex>
 #include <array>
 #include <atomic>
 #include <fstream>
@@ -166,6 +168,9 @@ pad_down = down
 pad_left = left
 pad_right = right
 
+# Mouse: right stick when the native camera hook is idle or unavailable
+mouse_to_joystick = right
+
 # Camera on the keyboard too (laptops without a mouse)
 axis_right_x_minus = j
 axis_right_x_plus = l
@@ -250,6 +255,109 @@ u32 GetEmuKey(EmuKey key) {
     return k == 0 ? emu_key_names[i].default_key : k == EmuKeyNone ? 0 : k;
 }
 
+namespace {
+std::mutex g_hints_mutex;
+std::vector<BindingHint> g_hints;
+} // namespace
+
+/// Friendly names for the controls hint.
+std::string PadName(const std::string& out) {
+    static const std::map<std::string, std::string> names = {
+        {"cross", "Cross"},
+        {"circle", "Circle"},
+        {"square", "Square"},
+        {"triangle", "Triangle"},
+        {"l1", "L1"},
+        {"r1", "R1"},
+        {"l2", "L2"},
+        {"r2", "R2"},
+        {"l3", "L3"},
+        {"r3", "R3"},
+        {"options", "Options"},
+        {"touchpad_left", "Touchpad left"},
+        {"touchpad_center", "Touchpad"},
+        {"touchpad_right", "Touchpad right"},
+        {"pad_up", "D-pad up"},
+        {"pad_down", "D-pad down"},
+        {"pad_left", "D-pad left"},
+        {"pad_right", "D-pad right"},
+        {"axis_left_y_minus", "Move forward"},
+        {"axis_left_y_plus", "Move back"},
+        {"axis_left_x_minus", "Move left"},
+        {"axis_left_x_plus", "Move right"},
+        {"axis_right_y_minus", "Camera up"},
+        {"axis_right_y_plus", "Camera down"},
+        {"axis_right_x_minus", "Camera left"},
+        {"axis_right_x_plus", "Camera right"},
+        {"motion_tilt_left", "Tilt pad left"},
+        {"motion_tilt_right", "Tilt pad right"},
+        {"motion_shake", "Shake pad"},
+    };
+    const auto it = names.find(out);
+    return it == names.end() ? std::string{} : it->second;
+}
+
+std::string KeyName(const std::string& key) {
+    static const std::map<std::string, std::string> names = {
+        {"leftbutton", "Left mouse"},   {"rightbutton", "Right mouse"},
+        {"middlebutton", "Middle mouse"}, {"space", "Space"},
+        {"lshift", "L-Shift"},          {"rshift", "R-Shift"},
+        {"lctrl", "L-Ctrl"},            {"rctrl", "R-Ctrl"},
+        {"lalt", "L-Alt"},              {"ralt", "R-Alt"},
+        {"enter", "Enter"},             {"escape", "Esc"},
+        {"tab", "Tab"},                 {"backspace", "Backspace"},
+        {"up", "Up"},                   {"down", "Down"},
+        {"left", "Left"},               {"right", "Right"},
+        {"mousewheelup", "Wheel up"},   {"mousewheeldown", "Wheel down"},
+    };
+    if (const auto it = names.find(key); it != names.end()) {
+        return it->second;
+    }
+    if (key.size() == 3 && key.rfind("kp", 0) == 0) {
+        return "Num " + key.substr(2);
+    }
+    std::string k = key;
+    for (auto& c : k) {
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    }
+    return k;
+}
+
+/// Keyboard / mouse lines of the config (controller-to-controller lines are skipped).
+void RecordHint(std::vector<BindingHint>& hints, const std::string& out, const std::string& in) {
+    const std::string pad = PadName(out);
+    if (pad.empty() || in.empty()) {
+        return;
+    }
+    std::string keys;
+    std::size_t start = 0;
+    while (start <= in.size()) {
+        const std::size_t comma = in.find(',', start);
+        const std::string token = in.substr(start, comma == std::string::npos ? std::string::npos
+                                                                               : comma - start);
+        if (!string_to_keyboard_key_map.contains(token)) {
+            return; // a controller input, an axis or an unknown name
+        }
+        keys += (keys.empty() ? "" : " + ") + KeyName(token);
+        if (comma == std::string::npos) {
+            break;
+        }
+        start = comma + 1;
+    }
+    for (auto& h : hints) {
+        if (h.pad == pad) {
+            h.keys += " / " + keys;
+            return;
+        }
+    }
+    hints.push_back(BindingHint{pad, keys});
+}
+
+std::vector<BindingHint> GetKeyboardHints() {
+    std::scoped_lock lk{g_hints_mutex};
+    return g_hints;
+}
+
 std::filesystem::path GetInputConfigFile(const std::string& game_id) {
     // Read configuration file of the game, and if it doesn't exist, generate it from default
     // If that doesn't exist either, generate that from getDefaultConfig() and try again
@@ -308,6 +416,7 @@ std::filesystem::path GetInputConfigFile(const std::string& game_id) {
             {"hotkey_emulator_settings", "f3"},
             {"hotkey_toggle_friends", "f2"},
             {"hotkey_adaptive_overlay", "f1"},
+            {"hotkey_controls_hint", "home"},
             {"hotkey_mouse_aim_slower", "minus"},
             {"hotkey_mouse_aim_faster", "equals"},
             {"motion_tilt_left", "g"},
@@ -508,8 +617,11 @@ std::optional<int> parseInt(const std::string& s) {
 };
 
 void ParseInputConfig(const std::string game_id = "") {
+    // inFAMOUS Second Son always uses its own layout file (the PC keyboard / mouse layout),
+    // even when the emulator is set to one shared input config for all games.
     std::string game_id_or_default =
-        EmulatorSettings.IsUseUnifiedInputConfig() ? "default" : game_id;
+        EmulatorSettings.IsUseUnifiedInputConfig() && !IsSecondSonSerial(game_id) ? "default"
+                                                                                   : game_id;
     const auto config_file = GetInputConfigFile(game_id_or_default);
     const auto global_config_file = GetInputConfigFile("global");
 
@@ -532,6 +644,7 @@ void ParseInputConfig(const std::string game_id = "") {
     for (auto& k : emu_keys) {
         k.store(0, std::memory_order_relaxed); // a reload without the line returns to the default
     }
+    std::vector<BindingHint> hints;
     int lineCount = 0;
 
     std::ifstream config_stream(config_file);
@@ -570,6 +683,7 @@ void ParseInputConfig(const std::string game_id = "") {
         if (ParseEmuKeyLine(output_string, input_string)) {
             return;
         }
+        RecordHint(hints, output_string, input_string);
         s8 input_gamepad_id = -1, output_gamepad_id = -1; // -1 means it's not specified
 
         // input gamepad id is only for controllers, it's discarded otherwise
@@ -789,6 +903,10 @@ void ParseInputConfig(const std::string game_id = "") {
         }
         LOG_INFO(Input, "Mouse buttons: R2 / L2 on the left / right button {}",
                  config_uses_buttons ? "skipped (the config binds the mouse buttons)" : "added");
+    }
+    {
+        std::scoped_lock lk{g_hints_mutex};
+        g_hints = std::move(hints);
     }
     std::sort(connections.begin(), connections.end());
     for (auto& c : connections) {
@@ -1062,6 +1180,11 @@ void ControllerOutput::FinalizeUpdate(u8 gamepad_index) {
         case HOTKEY_ADAPTIVE_OVERLAY:
             if (new_button_state) {
                 PushSDLEvent(SDL_EVENT_TOGGLE_ADAPTIVE_OVERLAY);
+            }
+            break;
+        case HOTKEY_CONTROLS_HINT:
+            if (new_button_state) {
+                PushSDLEvent(SDL_EVENT_TOGGLE_CONTROLS_HINT);
             }
             break;
         case HOTKEY_TOGGLE_FRIENDS:

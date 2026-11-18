@@ -1284,6 +1284,8 @@ set(ADAPTIVE src/adaptive/adaptive_overlay.cpp
              src/adaptive/stats.h
              src/adaptive/telemetry.cpp
              src/adaptive/telemetry.h
+             src/imgui/controls_hint_layer.cpp
+             src/imgui/controls_hint_layer.h
              src/imgui/notice_layer.cpp
              src/imgui/notice_layer.h
 )

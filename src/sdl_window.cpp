@@ -25,6 +25,7 @@
 #include "core/mouse_aim.h"
 #include "core/user_settings.h"
 #include "imgui/friends_layer.h"
+#include "imgui/controls_hint_layer.h"
 #include "imgui/notice_layer.h"
 #include "imgui/renderer/imgui_core.h"
 #include "input/controller.h"
@@ -393,6 +394,9 @@ void WindowSDL::WaitEvent() {
         break;
     case SDL_EVENT_TOGGLE_ADAPTIVE_OVERLAY:
         Adaptive::Glue::ToggleOverlay();
+        break;
+    case SDL_EVENT_TOGGLE_CONTROLS_HINT:
+        Overlay::ControlsHint::Toggle();
         break;
     case SDL_EVENT_ADD_VIRTUAL_USER:
         for (int i = 0; i < 4; i++) {

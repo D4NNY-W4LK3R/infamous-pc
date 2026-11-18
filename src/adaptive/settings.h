@@ -5,7 +5,8 @@
 //
 //   mode = manual          observe | manual | automatic | calibration
 //   enabled = 1            0 turns the whole optimizer off (no thread, no telemetry)
-//   overlay = 1            the F9 status window is available
+//   overlay = 1            the F1 optimizer window is available
+//   controls_hint = 1      on-screen keyboard / mouse equivalents of the button prompts (Home)
 //   calibrate_on_battery = 0
 //   tick_ms = 1000
 //
@@ -29,6 +30,7 @@ struct UserSettings {
     bool enabled = true;
     Mode mode = Mode::Manual;
     bool overlay = true;
+    bool controls_hint = true; ///< keyboard / mouse equivalents of the button prompts (Home)
     bool calibrate_on_battery = false;
     std::uint32_t tick_ms = 1000;
     std::vector<std::string> warnings; ///< unknown keys, bad values (not fatal)

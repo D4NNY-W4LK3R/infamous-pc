@@ -290,8 +290,17 @@ void ReportVulkanDevice(const std::string& name, std::uint32_t vendor_id, std::u
                     vendor_id, device_id, g_hardware.gpu.vendor_id, g_hardware.gpu.device_id);
         g_brain->RequestMode(Mode::Observe);
     }
-    (void)api_version;
-    (void)integrated;
+    GpuInfo g;
+    g.name = name;
+    g.vendor_id = vendor_id;
+    g.device_id = device_id;
+    g.driver_version = DecodeDriverVersion(vendor_id, driver_version);
+    g.vulkan_api_version = api_version;
+    g.device_local_bytes = device_local_bytes;
+    g.budget_bytes = budget_bytes;
+    g.memory_budget_ext = memory_budget_ext;
+    g.integrated = integrated;
+    g_brain->SetRendererGpu(g);
 }
 
 void SetVramSampler(std::function<std::uint64_t()> used, std::function<std::uint64_t()> budget) {

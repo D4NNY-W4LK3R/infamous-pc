@@ -15,8 +15,11 @@ A. STARTS AND RUNS LIKE THE 4 GB BUILD (baseline preserved)
 B. NATIVE MOUSE AND KEYBOARD
   [ ] B1  Log has either "Mouse aim: camera hook at" (true mouse look) or
           "Mouse aim: camera hook NOT installed (...)". Write down which: ______________
-  [ ] B2  If installed: moving the mouse turns the camera immediately, with no stick-like
-          acceleration; the speed is the same whether you move slowly or quickly.
+  [ ] B2  If installed: once you walk around freely the log gets "Mouse aim: gameplay camera live"
+          and moving the mouse turns the camera immediately, with no stick-like acceleration.
+  [ ] B2b Spray painting (the billboard at the start): the pointer follows the mouse (motion
+          sensor), left click sprays, G / H tilt, T shakes the can.
+  [ ] B2c The panel at the bottom left lists the keys (Space = Cross, ...); Home hides it.
   [ ] B3  - and = change the speed (a notice appears); restart: the speed is remembered.
   [ ] B4  Left click shoots, right click aims; the click that focuses the window does not shoot.
   [ ] B5  F7 releases the mouse (cursor visible), F7 again captures it.
@@ -29,7 +32,8 @@ B. NATIVE MOUSE AND KEYBOARD
   [ ] B10 A controller (if you have one) still works alongside keyboard and mouse.
 
 C. OPTIMIZER - SAFE BY DEFAULT
-  [ ] C1  F1 opens the optimizer window; it shows FPS, frame times, VRAM and "Limit: ...".
+  [ ] C1  F1 opens the optimizer window; it shows FPS, frame times, VRAM, "Limit: ..." and the
+          mouse camera state.
   [ ] C2  In Manual mode nothing changes by itself: "Values in effect" stay at their defaults.
   [ ] C3  Quit normally. user\adaptive\latest-report.txt exists and lists your CPU, RAM and
           "NVIDIA GeForce GTX 1650" with the driver version.

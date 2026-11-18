@@ -65,14 +65,17 @@ UserSettings ParseSettings(const std::string& text) {
                 s.warnings.push_back("mode '" + value + "' unknown; kept " +
                                      std::string(ToString(s.mode)));
             }
-        } else if (key == "enabled" || key == "overlay" || key == "calibrate_on_battery") {
+        } else if (key == "enabled" || key == "overlay" || key == "calibrate_on_battery" ||
+                   key == "controls_hint") {
             const auto b = ParseBool(value);
             if (!b) {
                 s.warnings.push_back(key + " '" + value + "' is not 0/1");
                 continue;
             }
-            (key == "enabled" ? s.enabled : key == "overlay" ? s.overlay : s.calibrate_on_battery) =
-                *b;
+            (key == "enabled"         ? s.enabled
+             : key == "overlay"       ? s.overlay
+             : key == "controls_hint" ? s.controls_hint
+                                      : s.calibrate_on_battery) = *b;
         } else if (key == "tick_ms") {
             std::uint32_t v = 0;
             const auto r = std::from_chars(value.data(), value.data() + value.size(), v);
@@ -90,7 +93,7 @@ UserSettings ParseSettings(const std::string& text) {
 
 std::string SerializeSettings(const UserSettings& s) {
     std::ostringstream o;
-    o << "# Second Son Adaptive optimizer settings. Changed from the F9 window, or edit here.\n"
+    o << "# Second Son Adaptive settings. Changed from the F1 window / Home key, or edit here.\n"
          "# mode: observe (measure only) | manual (recommend, you apply) |\n"
          "#       automatic (apply safe, measured live changes during gameplay) |\n"
          "#       calibration (also test one start-up setting per launch; leave the game idle\n"
@@ -98,6 +101,7 @@ std::string SerializeSettings(const UserSettings& s) {
     o << "mode = " << ToString(s.mode) << '\n';
     o << "enabled = " << (s.enabled ? 1 : 0) << '\n';
     o << "overlay = " << (s.overlay ? 1 : 0) << '\n';
+    o << "controls_hint = " << (s.controls_hint ? 1 : 0) << '\n';
     o << "calibrate_on_battery = " << (s.calibrate_on_battery ? 1 : 0) << '\n';
     o << "tick_ms = " << s.tick_ms << '\n';
     return o.str();

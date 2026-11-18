@@ -45,4 +45,9 @@ float ScaleSensitivity(float factor);
 /// One line for the log / overlay: installed, or why not.
 std::string StatusText();
 
+/// The hook is installed and the game's gameplay camera ran it within the last moment. False in
+/// menus, cut-scenes, pause, load screens and special scenes with their own camera (the spray
+/// can): there the mouse drives the right stick and the motion sensor instead (input_mouse.cpp).
+bool CameraLive();
+
 } // namespace Core::MouseAim

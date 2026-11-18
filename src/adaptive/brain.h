@@ -146,6 +146,9 @@ public:
         return *memory;
     }
     void SetResourceSampler(ResourceSampler sampler);
+    /// Details only the renderer knows (heap sizes, Vulkan driver version, budget support), for
+    /// the report. Does not change the fingerprint chosen at startup. Thread safe.
+    void SetRendererGpu(const GpuInfo& gpu);
 
     StartupResult Startup(const HardwareInfo& hw, const SoftwareInfo& sw, const EnvGet& env_get,
                           const EnvSet& env_set);
@@ -268,6 +271,8 @@ private:
     double tick_ms_total = 0.0;
 
     // Cross-thread.
+    mutable std::mutex renderer_gpu_mutex;
+    std::optional<GpuInfo> renderer_gpu;
     mutable std::mutex status_mutex;
     StatusView status;
     std::mutex command_mutex;

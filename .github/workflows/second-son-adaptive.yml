@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ssa-${{ github.ref }}
+  group: ssa2-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -142,22 +142,10 @@ jobs:
           Compress-Archive -Path "$pkg/*" -DestinationPath out/SecondSonAdaptive-windows-x64.zip -Force
           Write-Output "exe sha256 $hash"
 
-      - name: Package the one-click builder
-        shell: bash
-        run: |
-          trap 'echo "::error title=builder zip::line $LINENO: $BASH_COMMAND"' ERR
-          if [ -f tools/builder/make_builder_package.sh ]; then
-            bash tools/builder/make_builder_package.sh out/SecondSonAdaptive-Builder
-            (cd out && powershell -NoProfile -Command "Compress-Archive -Path SecondSonAdaptive-Builder -DestinationPath SecondSonAdaptive-Builder.zip -Force")
-          fi
-
       - uses: actions/upload-artifact@v7
         with:
           name: SecondSonAdaptive-windows-x64-${{ github.sha }}
-          path: |
-            out/SecondSonAdaptive-windows-x64.zip
-            out/SecondSonAdaptive-Builder.zip
-          if-no-files-found: warn
+          path: out/SecondSonAdaptive-windows-x64.zip
 
       - uses: actions/upload-artifact@v7
         with:
@@ -174,50 +162,6 @@ jobs:
           short=$(git rev-parse --short=8 HEAD)
           tag="ssa-${GITHUB_REF_NAME//\//-}-${GITHUB_RUN_NUMBER}-${short}"
           files=(out/SecondSonAdaptive-windows-x64.zip)
-          [ -f out/SecondSonAdaptive-Builder.zip ] && files+=(out/SecondSonAdaptive-Builder.zip)
           gh release create "$tag" "${files[@]}" --target "$GITHUB_SHA" --prerelease \
             --title "Second Son Adaptive build ${GITHUB_RUN_NUMBER} (${short})" \
-            --notes "Automated build of ${GITHUB_REF_NAME} at ${GITHUB_SHA}. Download SecondSonAdaptive-windows-x64.zip, extract it to E:\\SecondSonAdaptive\\Game and read README_FIRST.txt. SecondSonAdaptive-Builder.zip rebuilds the same sources on your PC (optional)."
-
-  # Runs the player's one-click builder end to end on a clean Windows machine (Windows
-  # PowerShell 5.1, as on the player's PC): pinned clone, patch + tree verification, build,
-  # tests, smoke test, packaging. Only the drive rule is relaxed (runners have no E:).
-  builder-selftest:
-    runs-on: windows-2025-vs2026
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - name: Make the builder package from this commit
-        shell: bash
-        run: |
-          if [ ! -f tools/builder/make_builder_package.sh ]; then echo "no builder on this commit"; exit 0; fi
-          bash tools/builder/make_builder_package.sh builder-pkg
-      - name: Check-only run
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Continue'
-          Get-PSDrive -PSProvider FileSystem | Format-Table Name,@{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}}
-          $ps1 = "$env:GITHUB_WORKSPACE\builder-pkg\Build-SecondSonAdaptive.ps1"
-          if (!(Test-Path $ps1)) { exit 0 }
-          $p = Start-Process -FilePath powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$ps1,'-CheckOnly','-AllowAnyDrive','-NonInteractive','-MinFreeGB','10','-Workspace','C:\ssa') -NoNewWindow -Wait -PassThru -RedirectStandardOutput check.out.log -RedirectStandardError check.err.log
-          Get-Content check.out.log, check.err.log
-          if ($p.ExitCode -ne 0) {
-            Get-Content check.out.log, check.err.log | Select-Object -Last 25 | ForEach-Object { Write-Output "::error title=builder check::$_" }
-            exit 1
-          }
-
-      - name: Full builder run
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Continue'
-          $ps1 = "$env:GITHUB_WORKSPACE\builder-pkg\Build-SecondSonAdaptive.ps1"
-          if (!(Test-Path $ps1)) { exit 0 }
-          $p = Start-Process -FilePath powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$ps1,'-AllowAnyDrive','-NonInteractive','-MinFreeGB','10','-Workspace','C:\ssa','-Jobs','4') -NoNewWindow -Wait -PassThru -RedirectStandardOutput full.out.log -RedirectStandardError full.err.log
-          Get-Content full.out.log -Tail 60
-          Get-Content full.err.log -Tail 20
-          if ($p.ExitCode -ne 0) {
-            Get-Content full.out.log, full.err.log | Select-String -Pattern 'BUILD STOPPED|error|FAILED' | Select-Object -Last 15 | ForEach-Object { Write-Output "::error title=builder::$($_.Line)" }
-            Get-Content full.out.log, full.err.log | Select-Object -Last 12 | ForEach-Object { Write-Output "::error title=builder tail::$_" }
-            exit 1
-          }
+            --notes "Automated build of ${GITHUB_REF_NAME} at ${GITHUB_SHA}. Download SecondSonAdaptive-windows-x64.zip, extract it to E:\\SecondSonAdaptive\\Game and read README_FIRST.txt."
