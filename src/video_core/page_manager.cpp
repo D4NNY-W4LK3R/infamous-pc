@@ -654,12 +654,31 @@ struct SignalImpl : public PageManager::Impl {
         ReportFaultRips(s_total_read_faults.load(std::memory_order_relaxed), true);
     }
 
+    /// A page the GPU wrote to (reads must fault so it is copied back first) that the CPU may
+    /// write asks for write-only access, which x86 pages cannot have. That stopped the emulator
+    /// with an assertion (seen in inFAMOUS Second Son with the particle late-read patch). No
+    /// access is the stricter of the two and handles both: a read faults and is copied back as
+    /// usual; a write faults and the write path copies GPU-modified memory back before marking
+    /// it CPU-modified (BufferCache::InvalidateMemory).
+    static Core::MemoryPermission ValidPerms(VAddr address, Core::MemoryPermission perms) {
+        if (perms != Core::MemoryPermission::Write) {
+            return perms;
+        }
+        static std::atomic<u64> count{0};
+        const u64 n = count.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (n == 1 || n == 100 || n % 10000 == 0) {
+            LOG_WARNING(Render, "Write-only page protection asked for at {:#x} ({} times so far): "
+                                "using no access instead",
+                        address, n);
+        }
+        return Core::MemoryPermission::None;
+    }
+
     void Protect(VAddr address, size_t size, Core::MemoryPermission perms) override {
         RENDERER_TRACE;
+        perms = ValidPerms(address, perms);
         if (applies_deferred_protection) {
             // Counted with the rest of that thread's work.
-            ASSERT_MSG(perms != Core::MemoryPermission::Write,
-                       "Attempted to protect region as write-only which is not a valid permission");
             Core::Memory::Instance()->GetAddressSpace().Protect(address, size, perms);
             return;
         }
@@ -669,8 +688,6 @@ struct SignalImpl : public PageManager::Impl {
                                             : Common::Perf::Stall::PageProtect};
         auto* memory = Core::Memory::Instance();
         auto& impl = memory->GetAddressSpace();
-        ASSERT_MSG(perms != Core::MemoryPermission::Write,
-                   "Attempted to protect region as write-only which is not a valid permission");
         impl.Protect(address, size, perms);
     }
 

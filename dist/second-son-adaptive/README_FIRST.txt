@@ -105,8 +105,10 @@ FRAME RATE AND SETTINGS (F3)
 SECOND SON GAME PATCHES (F3 > Graphics, apply at the next launch; game update 01.07 only)
   Ported from the shadPS4-second-son v1.1.1 fork. Each checks the game's code byte for byte
   first and is skipped if anything differs; F1 > "Second Son game patches" shows what is on.
-  Particle Timing Fix (on): the game reads its particle results one frame later instead of
-    waiting for the graphics card in the middle of every frame.
+  Particle Timing Fix (off): the game reads its particle results one frame later instead of
+    waiting for the graphics card in the middle of every frame. Off by default since build 25:
+    with it on there were white flashes, and the emulator stopped twice. If it stops with it
+    on, it is turned off for the next launch automatically.
   Particle Lights in One Submit (off, experimental): fewer GPU submissions in big fights.
   Performance Mode: Off / Low / Office - the game's own lower quality levels.
     Low:    less detail far away, one sun-shadow layer less, particles (smoke!) at half

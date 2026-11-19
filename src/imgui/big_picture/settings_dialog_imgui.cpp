@@ -786,7 +786,8 @@ void SettingsWindow::DrawSettingsTable(SettingsCategory category) {
                 AddSettingCombo("Optimizer: Lowest Quality It May Use", lowestQualitySetting,
                                 lowestQualityOptions);
             }
-            AddSettingCheckbox("Second Son: Particle Timing Fix (next launch)",
+            AddSettingCheckbox("Second Son: Particle Timing Fix (next launch; can cause white "
+                               "flashes)",
                                particleLateReadSetting);
             if (particleLateReadSetting) {
                 AddSettingCheckbox("Second Son: Particle Lights in One Submit (experimental, "

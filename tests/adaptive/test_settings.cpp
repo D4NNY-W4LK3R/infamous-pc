@@ -68,8 +68,9 @@ TEST(Settings, FrameLimitParsesRoundTripsAndRejectsNonsense) {
 TEST(Settings, GamePatchOptions) {
     const auto d = ParseSettings("");
     EXPECT_EQ(d.perf_mode, 0u);
-    EXPECT_TRUE(d.particle_late_read);
+    EXPECT_FALSE(d.particle_late_read); // off by default since build 25
     EXPECT_FALSE(d.particle_light_one_submit);
+    EXPECT_TRUE(ParseSettings("particle_late_read = 1\n").particle_late_read);
     const auto s = ParseSettings("perf_mode = Office\nparticle_late_read = 0\n"
                                  "particle_light_one_submit = 1\nperf_mode_typo = 1\n");
     EXPECT_EQ(s.perf_mode, 2u);

@@ -6,6 +6,7 @@
 
 #include <imgui.h>
 
+#include "imgui/controls_hint_layer.h"
 #include "imgui/imgui_layer.h"
 #include "imgui/touchpad_layer.h"
 #include "input/controller.h"
@@ -20,6 +21,9 @@ using Clock = std::chrono::steady_clock;
 class TouchpadLayer final : public ImGui::Layer {
 public:
     void Draw() override {
+        if (!Overlay::ControlsHint::Visible()) {
+            return; // Home hides it together with the key panel
+        }
         const Input::TouchpadSnapshot pad = Input::LastTouchpad();
         const bool grip = Input::TouchGripActive();
         const Input::TouchModeView mode = Input::GetTouchModeView();

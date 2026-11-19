@@ -6,6 +6,7 @@
 // A small picture of the PS4 touchpad at the bottom of the screen, shown while anything touches
 // it (the touch grip, Delete's touch mode, the touchpad keys and swipes): where each finger is
 // and whether the pad is pressed down, so a slide can be aimed at the mark the game shows.
+// Home shows and hides it together with the key panel.
 namespace Overlay::Touchpad {
 
 /// Called by the presenter once ImGui is up.

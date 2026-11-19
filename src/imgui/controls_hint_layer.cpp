@@ -95,7 +95,7 @@ public:
             ImGui::TextDisabled("  (click = press, hold = drain, + right button = two fingers)");
             ImGui::TextDisabled("Two fingerprints on screen: hold R + Y (both touchpad sides)");
             ImGui::TextDisabled("Swipe keys Z X V B / wheel: hold the key to keep the finger down");
-            ImGui::TextDisabled("Home hides this | F1 optimizer | F7 mouse | Del touchpad");
+            ImGui::TextDisabled("Home hides this and the small touchpad | F1 optimizer | F7 mouse");
             ImGui::SetWindowFontScale(1.0f);
         }
         ImGui::End();
@@ -105,6 +105,14 @@ public:
 ControlsHintLayer g_layer;
 
 } // namespace
+
+bool Visible() {
+    const int v = g_visible.load(std::memory_order_relaxed);
+    if (v >= 0) {
+        return v != 0;
+    }
+    return Adaptive::Glue::SettingsForOverlay().controls_hint;
+}
 
 void Toggle() {
     int v = g_visible.load(std::memory_order_relaxed);
