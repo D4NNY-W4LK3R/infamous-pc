@@ -127,7 +127,7 @@ std::string KnowledgeStore::Serialize(const Knowledge& k) {
               << '\n';
         }
         if (p.auto_perf_mode >= 0) {
-            o << "autoperf " << p.auto_perf_mode << '\n';
+            o << "autoperf " << p.auto_perf_mode << ' ' << p.auto_render_height << '\n';
         }
         if (p.partial) {
             const auto& e = *p.partial;
@@ -344,6 +344,10 @@ bool KnowledgeStore::Parse(const std::string& text, Knowledge& out, bool& schema
             if (!(ls >> cur->auto_perf_mode) || cur->auto_perf_mode < -1 ||
                 cur->auto_perf_mode > 2) {
                 return false;
+            }
+            std::uint32_t h = 0;
+            if (ls >> h) { // build 30 on; older lines end after the mode
+                cur->auto_render_height = h;
             }
         } else if (tag == "partial" && cur) {
             PartialEvaluation e;

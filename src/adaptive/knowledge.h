@@ -82,6 +82,9 @@ struct Profile {
     std::optional<PartialEvaluation> partial;
     /// Performance mode the fps-target controller chose for the next launch (-1 = none yet).
     std::int32_t auto_perf_mode = -1;
+    /// Render height the frame-rate target chose with auto_perf_mode (0 = the game's own). Kept
+    /// as a second number on the autoperf line: builds before 30 read the first and ignore it.
+    std::uint32_t auto_render_height = 0;
 
     static constexpr std::size_t MaxHistory = 256;
     static constexpr std::size_t MaxBaselineSeconds = 1200;

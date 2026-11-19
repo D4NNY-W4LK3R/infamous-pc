@@ -7,6 +7,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "adaptive/quality_ladder.h"
 #include "adaptive/settings.h"
 
 namespace Adaptive {
@@ -112,6 +113,15 @@ UserSettings ParseSettings(const std::string& text) {
                 continue;
             }
             s.auto_perf_max = parsed.perf_mode;
+        } else if (key == "render_height" || key == "auto_render_min") {
+            std::uint32_t v = 0;
+            const auto r = std::from_chars(value.data(), value.data() + value.size(), v);
+            if (r.ec != std::errc{} || (v != 0 && NormalizeRenderHeight(v) != v)) {
+                s.warnings.push_back(key + " must be 1080, 1008, 936, 864, 792, 720 or 648");
+                continue;
+            }
+            (key == "render_height" ? s.render_height : s.auto_render_min) =
+                NormalizeRenderHeight(v);
         } else if (key == "particle_late_read" || key == "particle_light_one_submit") {
             const auto b = ParseBool(value);
             if (!b) {
@@ -160,6 +170,12 @@ std::string SerializeSettings(const UserSettings& s) {
     o << "fps_target = " << s.fps_target << '\n';
     o << "auto_perf_max = "
       << (s.auto_perf_max == 1 ? "low" : s.auto_perf_max == 2 ? "office" : "off") << '\n';
+    o << "# render size: the game renders this many lines (16:9; 1080 = its own size) and the\n"
+         "# picture is scaled to the window: 1080 | 1008 | 936 | 864 | 792 | 720 | 648 (next launch)\n";
+    o << "render_height = " << s.render_height << '\n';
+    o << "# the smallest render size the frame-rate target may use (1080 = never change it); it\n"
+         "# goes performance mode low first, then smaller sizes, then office if allowed\n";
+    o << "auto_render_min = " << s.auto_render_min << '\n';
     return o.str();
 }
 
@@ -202,6 +218,17 @@ UserSettings LoadSettings(const std::filesystem::path& file,
             s.frame_limit = f;
         } else {
             s.warnings.push_back("SS_FRAME_LIMIT '" + *v + "' must be 0 or 15..240");
+        }
+    }
+    // v1.1.1's name for the render height.
+    if (const auto v = env("SHADPS4_RENDER_HEIGHT")) {
+        std::uint32_t h = 0;
+        const auto r = std::from_chars(v->data(), v->data() + v->size(), h);
+        if (r.ec == std::errc{} && NormalizeRenderHeight(h) == h) {
+            s.render_height = h;
+        } else {
+            s.warnings.push_back("SHADPS4_RENDER_HEIGHT '" + *v +
+                                 "' must be 1080, 1008, 936, 864, 792, 720 or 648");
         }
     }
     if (const auto v = env("SS_ADAPTIVE_MODE")) {

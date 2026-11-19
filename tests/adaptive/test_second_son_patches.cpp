@@ -97,3 +97,63 @@ TEST(SecondSonPatches, LowModeWritesTheLadderRow) {
     EXPECT_FLOAT_EQ(lod, 0.7f);
     EXPECT_EQ(p.writes[0].offset, 0xda08c0u);
 }
+
+namespace {
+std::uint32_t Read32(const std::uint8_t* img, std::uint64_t off) {
+    std::uint32_t v = 0;
+    std::memcpy(&v, img + off, 4);
+    return v;
+}
+} // namespace
+
+TEST(SecondSonPatches, RenderSizeWritesTheSixSizesAndKeepsTheHudLayout) {
+    Options o;
+    o.particle_late_read = false;
+    o.render_height = 792;
+    auto img = Image(o);
+    const Plan p = MakePlan(img.get(), ImageSize, o, All);
+    EXPECT_TRUE(p.eboot_107);
+    EXPECT_EQ(p.render_width, 1408u);
+    EXPECT_EQ(p.render_height, 792u);
+    ASSERT_EQ(p.writes.size(), 6u);
+    for (const auto& w : p.writes) {
+        std::memcpy(img.get() + w.offset, w.bytes.data(), w.bytes.size());
+    }
+    for (const std::uint64_t off : {0x1eff4aull, 0x1eff57ull, 0x1f0d3eull}) {
+        EXPECT_EQ(Read32(img.get(), off), 1408u) << std::hex << off;
+    }
+    for (const std::uint64_t off : {0x1eff51ull, 0x1eff5eull, 0x1f0d4dull}) {
+        EXPECT_EQ(Read32(img.get(), off), 792u) << std::hex << off;
+    }
+    EXPECT_EQ(Read32(img.get(), 0x1f0403), 1920u); // HUD layout untouched
+    EXPECT_EQ(Read32(img.get(), 0x1f03fb), 1080u);
+}
+
+TEST(SecondSonPatches, RenderSizeIsRefusedAloneWhenItsCodeDiffers) {
+    Options o;
+    o.particle_late_read = true;
+    o.perf_mode = 1;
+    o.render_height = 720;
+    auto img = Image(o);
+    img[0x1f0403] = 0x00; // the HUD layout's 1920 is something else here
+    const Plan p = MakePlan(img.get(), ImageSize, o, All);
+    EXPECT_TRUE(p.late_read);
+    EXPECT_EQ(p.perf_mode, 1u);
+    EXPECT_EQ(p.render_height, 1080u);
+    for (const auto& w : p.writes) {
+        EXPECT_FALSE(w.offset >= 0x1eff40 && w.offset < 0x1f0d60) << "no size was written";
+    }
+}
+
+TEST(SecondSonPatches, OnlyTheListedRenderSizes) {
+    Options o;
+    o.particle_late_read = false;
+    o.render_height = 700;
+    auto img = Image(o);
+    const Plan p = MakePlan(img.get(), ImageSize, o, All);
+    EXPECT_TRUE(p.writes.empty());
+    EXPECT_EQ(p.render_height, 1080u);
+    o.render_height = 1080; // the game's own: nothing to do
+    const Plan q = MakePlan(img.get(), ImageSize, o, All);
+    EXPECT_TRUE(q.writes.empty());
+}

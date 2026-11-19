@@ -216,7 +216,7 @@ void Linker::Execute(const std::vector<std::string>& args) {
             Core::SecondSonPatches::Apply(
                 module->GetBaseAddress(), module->aligned_base_size,
                 {g.particle_late_read, g.particle_light_one_submit,
-                 Adaptive::Glue::EffectivePerfMode()});
+                 Adaptive::Glue::EffectivePerfMode(), Adaptive::Glue::EffectiveRenderHeight()});
             Adaptive::Glue::NoteGamePatchesApplied(
                 Core::SecondSonPatches::Applied().late_read);
         }

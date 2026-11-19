@@ -384,17 +384,40 @@ StartupResult CentralBrain::Startup(const HardwareInfo& hw, const SoftwareInfo& 
         }
     }
 
-    // Frame-rate target: the game's quality level for this launch, between the player's own
-    // choice (floor) and the lowest quality they allow (max).
-    if (config.fps_target > 0 && config.perf_mode_max > config.perf_mode_floor) {
-        const auto lo = static_cast<std::int32_t>(config.perf_mode_floor);
-        const auto hi = static_cast<std::int32_t>(config.perf_mode_max);
-        launch_perf_mode = p.auto_perf_mode >= 0 ? std::clamp(p.auto_perf_mode, lo, hi) : lo;
-        r.perf_mode = launch_perf_mode;
-        static constexpr const char* Names[] = {"off", "low", "office"};
-        Note("frame-rate target " + std::to_string(config.fps_target) +
-             " fps: this launch uses performance mode " + Names[launch_perf_mode] +
-             " (allowed: " + Names[lo] + " to " + Names[hi] + ")");
+    // Frame-rate target: the game's quality for this launch, a step on the ladder between the
+    // player's own choice and the lowest quality they allow (performance mode and render size).
+    if (config.fps_target > 0) {
+        quality_ladder = BuildLadder({config.perf_mode_floor, config.perf_mode_max,
+                                      config.render_height, config.render_height_min});
+        if (quality_ladder.size() > 1) {
+            launch_step = 0;
+            if (p.auto_perf_mode >= 0) {
+                const std::uint32_t own = NormalizeRenderHeight(config.render_height);
+                launch_step = FindStep(quality_ladder,
+                                       {static_cast<std::uint32_t>(p.auto_perf_mode),
+                                        p.auto_render_height ? p.auto_render_height : own});
+                if (p.auto_render_height == 0 && p.auto_perf_mode == 2) {
+                    // Chosen by a build without render sizes: office was the only step below
+                    // low. Smaller sizes at low come first now.
+                    const std::size_t low = FindStep(quality_ladder, {1, own});
+                    if (quality_ladder[low] == QualityStep{1, own} &&
+                        low + 1 < quality_ladder.size()) {
+                        launch_step = low + 1;
+                    }
+                }
+            }
+            const QualityStep& s = quality_ladder[launch_step];
+            launch_perf_mode = static_cast<std::int32_t>(s.perf_mode);
+            r.perf_mode = launch_perf_mode;
+            r.render_height = s.render_height;
+            Note("frame-rate target " + std::to_string(config.fps_target) +
+                 " fps: this launch uses " + Describe(s) + " (step " +
+                 std::to_string(launch_step + 1) + " of " +
+                 std::to_string(quality_ladder.size()) + ", down to " +
+                 Describe(quality_ladder.back()) + ")");
+        } else {
+            quality_ladder.clear();
+        }
     }
 
     r.launch_values = knobs.ApplyLaunchValues(chosen, env_get, env_set);
@@ -1309,46 +1332,26 @@ void CentralBrain::UpdateCalibration(std::uint64_t, bool finishing) {
 
 void CentralBrain::DecideNextPerfMode() {
     Profile* p = CurrentProfile();
-    if (!p || launch_perf_mode < 0 || config.fps_target == 0) {
+    if (!p || launch_perf_mode < 0 || config.fps_target == 0 || quality_ladder.empty()) {
         return;
     }
-    static constexpr const char* Names[] = {"off", "low", "office"};
     const auto& play = scene_stats[static_cast<std::size_t>(Scene::Gameplay)].medians;
-    const std::int32_t lo = static_cast<std::int32_t>(config.perf_mode_floor);
-    const std::int32_t hi = static_cast<std::int32_t>(config.perf_mode_max);
-    std::int32_t next = launch_perf_mode;
-    const double target_ms = 1000.0 / static_cast<double>(config.fps_target);
+    std::size_t next = launch_step;
     if (play.size() < 120) {
-        perf_mode_decision = F("only %.0f s of gameplay this launch (120 needed); performance "
-                               "mode stays ",
+        perf_mode_decision = F("only %.0f s of gameplay this launch (120 needed); it stays at ",
                                static_cast<double>(play.size())) +
-                             Names[launch_perf_mode];
+                             Describe(quality_ladder[launch_step]);
     } else {
         const double med = Stats::Percentile(play, 0.5);
         const double busy =
             gameplay_gpu_busy.size() >= 60 ? Stats::Percentile(gameplay_gpu_busy, 0.5) : 0.0;
-        if (med > target_ms * 1.08 && launch_perf_mode < hi) {
-            next = launch_perf_mode + 1;
-            perf_mode_decision = F("gameplay ran at %.1f fps (target %.0f): next launch uses "
-                                   "performance mode ",
-                                   1000.0 / med, static_cast<double>(config.fps_target)) +
-                                 Names[next];
-        } else if (med <= target_ms * 1.03 && launch_perf_mode > lo && busy > 0.0 &&
-                   busy < target_ms * 0.65) {
-            // On target with the card idle a third of the time: try more quality.
-            next = launch_perf_mode - 1;
-            perf_mode_decision = F("gameplay held %.1f fps with the graphics card busy only "
-                                   "%.1f ms of %.1f: next launch tries performance mode ",
-                                   1000.0 / med, busy, target_ms) +
-                                 Names[next];
-        } else {
-            perf_mode_decision = F("gameplay ran at %.1f fps (target %.0f); performance mode "
-                                   "stays ",
-                                   1000.0 / med, static_cast<double>(config.fps_target)) +
-                                 Names[launch_perf_mode];
-        }
+        const LadderDecision d = DecideStep(quality_ladder, launch_step, med, busy,
+                                            static_cast<double>(config.fps_target));
+        next = d.next;
+        perf_mode_decision = d.reason;
     }
-    p->auto_perf_mode = next;
+    p->auto_perf_mode = static_cast<std::int32_t>(quality_ladder[next].perf_mode);
+    p->auto_render_height = quality_ladder[next].render_height;
     Note("frame-rate target: " + perf_mode_decision);
 }
 
@@ -1509,10 +1512,9 @@ void CentralBrain::UpdateStatus(std::uint64_t) {
     v.ticks = ticks;
     v.dropped_frames = dropped_frames;
     v.kill_switch = gate.KillSwitchTripped();
-    if (launch_perf_mode >= 0) {
-        static constexpr const char* Names[] = {"off", "low", "office"};
-        v.fps_target = std::to_string(config.fps_target) + " fps target: performance mode " +
-                       Names[launch_perf_mode] + " this launch" +
+    if (launch_perf_mode >= 0 && !quality_ladder.empty()) {
+        v.fps_target = std::to_string(config.fps_target) + " fps target: " +
+                       Describe(quality_ladder[launch_step]) + " this launch" +
                        (perf_mode_decision.empty() ? "" : "; " + perf_mode_decision);
     }
     v.scene_switches = switches.size();

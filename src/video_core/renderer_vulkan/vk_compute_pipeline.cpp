@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstdlib>
 #include <chrono>
 
 #include <boost/container/small_vector.hpp>
@@ -11,6 +12,17 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 
 namespace Vulkan {
+
+namespace {
+/// SS_FAST_FIRST_COMPILE=0 builds a new compute pipeline met in game with optimizations at once.
+bool FastFirstCompile() {
+    static const bool on = [] {
+        const char* v = std::getenv("SS_FAST_FIRST_COMPILE");
+        return v == nullptr || v[0] != '0';
+    }();
+    return on;
+}
+} // namespace
 
 ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
                                  DescriptorHeap& desc_heap, const Shader::Profile& profile,
@@ -151,7 +163,23 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
         // Its commands are recorded into Vulkan on a thread of its own, which binds the pipeline
         // only when it gets to the dispatch, so a compiler thread builds it meanwhile, and the
         // GPU thread goes on to find the next ones to build at the same time.
-        compile_job = compiler->Submit([this, create] { pipeline = create({}); }, true);
+        if (FastFirstCompile()) {
+            // Build 30: the recording thread still waited for them (on a GTX 1650: median 174
+            // ms, 1 in 10 over 0.5 s, 1,537 new ones in a 6-minute session - Second Son has
+            // thousands of effect shaders). The one it waits for is built without the driver's
+            // optimizations first, quicker to build; the optimized one follows at normal
+            // priority and replaces it once done (SwapInOptimized). SS_FAST_FIRST_COMPILE=0: off.
+            compile_job = compiler->Submit(
+                [this, create] {
+                    pipeline = create(vk::PipelineCreateFlagBits::eDisableOptimization);
+                },
+                true);
+            std::scoped_lock lock{optimize_mutex};
+            optimize_job = compiler->Submit([this, create] { optimized_pipeline = create({}); });
+            has_optimize_job.store(true, std::memory_order_release);
+        } else {
+            compile_job = compiler->Submit([this, create] { pipeline = create({}); }, true);
+        }
     } else if (cache_control) {
         // Otherwise one built without optimizations, which is quicker on some drivers, is used
         // now, and the optimized one replaces it once a compiler thread has it.

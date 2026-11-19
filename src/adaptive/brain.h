@@ -36,6 +36,7 @@
 #include <vector>
 
 #include "adaptive/contracts.h"
+#include "adaptive/quality_ladder.h"
 #include "adaptive/hardware.h"
 #include "adaptive/knobs.h"
 #include "adaptive/knowledge.h"
@@ -67,6 +68,8 @@ struct BrainConfig {
     std::uint32_t fps_target = 0;      ///< 0 = off
     std::uint32_t perf_mode_floor = 0; ///< the player's own choice (0 off, 1 low, 2 office)
     std::uint32_t perf_mode_max = 0;   ///< the lowest quality the player allows
+    std::uint32_t render_height = 1080;     ///< the player's own render size (quality_ladder.h)
+    std::uint32_t render_height_min = 1080; ///< the smallest render size the player allows
     // Launch A/B calibration.
     std::uint32_t calibration_target_seconds = 90;
     std::uint32_t calibration_min_seconds = 30;
@@ -151,6 +154,8 @@ struct StartupResult {
     LoadStatus load_status = LoadStatus::Fresh;
     /// Performance mode for this launch chosen by the fps-target controller (-1: not in use).
     std::int32_t perf_mode = -1;
+    /// Render height for this launch chosen with it (0: not in use).
+    std::uint32_t render_height = 0;
     std::map<std::string, std::int64_t> launch_values; ///< set in the environment by the brain
     std::optional<PendingExperiment> experiment;
     std::vector<std::string> notes;
@@ -333,6 +338,8 @@ private:
     std::vector<double> gameplay_gpu_busy; ///< per-second host GPU ms in gameplay (capped)
     std::deque<SceneSwitch> switches;      ///< newest last, capped
     std::int32_t launch_perf_mode = -1;    ///< chosen by the fps-target controller
+    std::vector<QualityStep> quality_ladder; ///< this launch's steps (empty: target off)
+    std::size_t launch_step = 0;             ///< the step this launch uses
     std::string perf_mode_decision;
 
     // This launch's calibration measurement.

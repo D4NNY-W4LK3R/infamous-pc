@@ -13,6 +13,10 @@
 //                       cascade less, particles at half resolution, 2 high-res texture blocks;
 //                       office = LOD 0.5, particles at quarter resolution, no high-res texture
 //                       blocks, half the pedestrians.
+//   render size         the game renders at a smaller 16:9 size (e.g. 1408x792 instead of
+//                       1920x1080): the size setup's render and output sizes and the Pro / HDR
+//                       mode switch's size get it; the HUD layout stays at 1920x1080 (so the HUD
+//                       keeps its size) and the presenter scales the picture to the window.
 //
 // Every site is compared byte for byte first; a site that differs refuses that patch (all or
 // nothing per patch) and the game runs unpatched. The planning is pure (unit-tested on synthetic
@@ -31,6 +35,7 @@ struct Options {
     bool particle_late_read = true;
     bool light_one_submit = false;
     std::uint32_t perf_mode = 0; ///< 0 off, 1 low, 2 office
+    std::uint32_t render_height = 1080; ///< 1080 = the game's own; see quality_ladder.h
 };
 
 struct Write {
@@ -43,6 +48,7 @@ struct Plan {
     bool late_read = false;
     bool light_one_submit = false;
     std::uint32_t perf_mode = 0;
+    std::uint32_t render_width = 1920, render_height = 1080; ///< the size the game renders at
     std::vector<Write> writes;
     std::vector<std::string> notes; ///< one line per decision, for the log and the F1 window
 };

@@ -82,18 +82,22 @@ struct GamePatchSettings {
     bool particle_late_read = true;
     bool particle_light_one_submit = false;
     std::uint32_t perf_mode = 0; ///< 0 off, 1 low, 2 office
+    std::uint32_t render_height = 1080; ///< quality_ladder.h RenderHeights; 1080 = the game's own
 };
 GamePatchSettings GamePatches();
 /// Saves them for the next launch.
 void SetGamePatches(const GamePatchSettings& patches);
 /// The performance mode this launch uses: the frame-rate target's choice, else the setting.
 std::uint32_t EffectivePerfMode();
+/// The render height this launch uses, the same way.
+std::uint32_t EffectiveRenderHeight();
 
 /// Frame-rate target (F3 > Graphics): the optimizer picks the performance mode per launch, from
 /// the player's own choice down to lowest_quality (0 = it may not lower quality).
 struct FpsTarget {
     std::uint32_t fps = 0;
     std::uint32_t lowest_quality = 0;
+    std::uint32_t lowest_render_height = 1080; ///< 1080 = it never changes the render size
 };
 FpsTarget GetFpsTarget();
 void SetFpsTarget(const FpsTarget& target);

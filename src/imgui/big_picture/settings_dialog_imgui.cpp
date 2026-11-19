@@ -85,6 +85,12 @@ void SettingsWindow::LoadSettings(std::string profile) {
             fpsTargetSetting = 0;
         }
         lowestQualitySetting = static_cast<int>(std::min<u32>(target.lowest_quality, 2));
+        const auto index_of = [this](u32 h) {
+            const auto at = std::find(renderHeightValues.begin(), renderHeightValues.end(), h);
+            return at == renderHeightValues.end() ? 0 : static_cast<int>(at - renderHeightValues.begin());
+        };
+        renderSizeSetting = index_of(patches.render_height);
+        smallestRenderSetting = index_of(target.lowest_render_height);
     }
     windowHeightSetting = EmulatorSettings.GetWindowHeight();
     windowWidthSetting = EmulatorSettings.GetWindowWidth();
@@ -152,17 +158,20 @@ void SettingsWindow::SaveSettings(std::string profile) {
         const auto before = Adaptive::Glue::GamePatches();
         const Adaptive::Glue::GamePatchSettings now{particleLateReadSetting,
                                                     particleLightsSetting && particleLateReadSetting,
-                                                    static_cast<u32>(perfModeSetting)};
-        if (now.perf_mode != before.perf_mode ||
+                                                    static_cast<u32>(perfModeSetting),
+                                                    renderHeightValues.at(renderSizeSetting)};
+        if (now.perf_mode != before.perf_mode || now.render_height != before.render_height ||
             now.particle_late_read != before.particle_late_read ||
             now.particle_light_one_submit != before.particle_light_one_submit) {
             Adaptive::Glue::SetGamePatches(now);
         }
         const auto target_before = Adaptive::Glue::GetFpsTarget();
         const Adaptive::Glue::FpsTarget target_now{fpsTargetValues.at(fpsTargetSetting),
-                                                   static_cast<u32>(lowestQualitySetting)};
+                                                   static_cast<u32>(lowestQualitySetting),
+                                                   renderHeightValues.at(smallestRenderSetting)};
         if (target_now.fps != target_before.fps ||
-            target_now.lowest_quality != target_before.lowest_quality) {
+            target_now.lowest_quality != target_before.lowest_quality ||
+            target_now.lowest_render_height != target_before.lowest_render_height) {
             Adaptive::Glue::SetFpsTarget(target_now);
         }
     }
@@ -780,11 +789,17 @@ void SettingsWindow::DrawSettingsTable(SettingsCategory category) {
                             frameLimitOptions);
             AddSettingCombo("Second Son: Performance Mode (next launch)", perfModeSetting,
                             perfModeOptions);
+            AddSettingCombo("Second Son: Render Size (next launch; turn on FSR below for a "
+                            "sharper picture)",
+                            renderSizeSetting, renderSizeOptions);
             AddSettingCombo("Optimizer: Frame-Rate Target (next launch)", fpsTargetSetting,
                             fpsTargetOptions);
             if (fpsTargetSetting != 0) {
                 AddSettingCombo("Optimizer: Lowest Quality It May Use", lowestQualitySetting,
                                 lowestQualityOptions);
+                AddSettingCombo("Optimizer: Smallest Render Size It May Use (it tries Low first, "
+                                "then smaller sizes, then Office)",
+                                smallestRenderSetting, smallestRenderOptions);
             }
             AddSettingCheckbox("Second Son: Particle Timing Fix (next launch; can cause white "
                                "flashes)",

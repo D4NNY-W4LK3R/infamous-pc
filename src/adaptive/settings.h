@@ -50,6 +50,11 @@ struct UserSettings {
     bool particle_light_one_submit = false;
     std::uint32_t fps_target = 0;    ///< 0 = off
     std::uint32_t auto_perf_max = 0; ///< 0 = the optimizer may not lower quality
+    /// The game's render size: height of one of quality_ladder.h's RenderHeights (1080 = its own;
+    /// smaller = fewer pixels, the presenter scales the picture to the window). Next launch.
+    std::uint32_t render_height = 1080;
+    /// The smallest render size the frame-rate target may use (1080 = it never changes the size).
+    std::uint32_t auto_render_min = 1080;
     std::vector<std::string> warnings; ///< unknown keys, bad values (not fatal)
 };
 

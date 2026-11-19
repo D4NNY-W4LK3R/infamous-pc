@@ -87,6 +87,9 @@ THE OPTIMIZER (F1)
   cutscene or the menu pauses it, and quitting keeps its seconds for the next session.
   Scene switches (gameplay <-> cutscene, loading) are measured: the report lists the freezes
   and what they were spent on (shader compiling, loading data, shared memory, the card).
+  Build 30: an effect shader the game needs right now is first built quickly without the
+  driver's optimizations, and the optimized one replaces it a moment later, so new effects
+  freeze the game for less time (SS_FAST_FIRST_COMPILE=0 turns this off).
   Frame-rate target (F3 > Graphics, next launch): "Optimizer: Frame-Rate Target" 30 and
   "Lowest Quality It May Use" Low or Office. After each launch it checks your gameplay frame
   rate and picks the performance mode for the next one: lower quality when you were under the
@@ -99,6 +102,10 @@ THE OPTIMIZER (F1)
   Every session writes user\adaptive\latest-report.txt: hardware, decisions, evidence, cost.
   Turn it off completely: enabled = 0 in user\adaptive\settings.ini (then the emulator behaves
   exactly like the plain 4 GB build).
+  With "Smallest Render Size It May Use" set as well, the target goes: your choice -> Low ->
+    smaller render sizes (down to your limit) -> Office (if allowed). So it reaches the frame
+    rate at Low's detail with fewer pixels before it takes Office's detail away. It moves one
+    step per launch (two when far below the target) and back up when the card has room.
 
 FRAME RATE AND SETTINGS (F3)
   F3 opens the emulator settings; the mouse pointer is free while it is open and mouse look
@@ -123,6 +130,10 @@ SECOND SON GAME PATCHES (F3 > Graphics, apply at the next launch; game update 01
             half the pedestrians.
   The optimizer recommends Low when the game stays well under 30 fps because of the graphics
   card ("Use next launch" in F1). If anything looks or behaves wrong, turn the patch off in F3.
+  Render Size (build 30): the game renders fewer pixels and the picture is scaled to the
+    window - 1920x1080 (its own), 1792x1008, 1664x936, 1536x864, 1408x792, 1280x720,
+    1152x648. The HUD keeps its size. Much lighter for the graphics card and its memory;
+    turn on "Enable FSR" in F3 > Graphics for a sharper picture at the smaller sizes.
 
 UPDATING TO A NEW BUILD - ONE DATA FOLDER FOR EVERY BUILD
   From this build on, saves, shader cache, settings, logs and what the optimizer learned live in

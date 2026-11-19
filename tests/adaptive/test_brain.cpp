@@ -5,6 +5,8 @@
 // whose times depend on the knob values the brain sets, on a fake clock.
 
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <algorithm>
 #include <functional>
 #include <map>
@@ -842,7 +844,80 @@ TEST(Brain, FrameRateTargetLowersQualityOnlyWithinTheLimit) {
         w.Seconds(*rig.brain, 200);
         rig.brain->Shutdown();
     }
-    EXPECT_EQ(modes, (std::vector<std::int32_t>{0, 1, 2, 2})) << "never beyond office";
+    // 19 fps is more than 25% under the target: two steps at once (build 30), straight to office.
+    EXPECT_EQ(modes, (std::vector<std::int32_t>{0, 2, 2, 2})) << "never beyond office";
+}
+
+TEST(Brain, FrameRateTargetUsesSmallerRenderSizesBeforeOffice) {
+    const auto dir = TempDir("fps-target-render");
+    std::vector<QualityStep> steps;
+    for (int launch = 0; launch < 6; ++launch) {
+        World w;
+        w.draws = Moving;
+        w.input = true;
+        Rig rig(w, dir, Mode::Automatic);
+        rig.cfg.fps_target = 30;
+        rig.cfg.perf_mode_floor = 0;
+        rig.cfg.perf_mode_max = 2;
+        rig.cfg.render_height = 1080;
+        rig.cfg.render_height_min = 720;
+        rig.brain = std::make_unique<CentralBrain>(rig.cfg, [&w] { return w.now; });
+        const auto r = rig.Start();
+        ASSERT_GE(r.perf_mode, 0);
+        const QualityStep s{static_cast<std::uint32_t>(r.perf_mode), r.render_height};
+        steps.push_back(s);
+        // GPU-bound: frame time follows the pixels; low saves 20%, office 40%.
+        const double pixels = static_cast<double>(s.render_height) * s.render_height /
+                              (1080.0 * 1080.0);
+        const double mode = s.perf_mode == 0 ? 1.0 : s.perf_mode == 1 ? 0.8 : 0.6;
+        const double ms = 45.0 * mode * (0.3 + 0.7 * pixels);
+        w.frame_ms = [ms](World&) { return ms; };
+        w.Seconds(*rig.brain, 200);
+        rig.brain->Shutdown();
+    }
+    // 45 ms -> two steps (more than 25% over) -> low 1008: 33.3 ms... stays once on target.
+    EXPECT_EQ(steps[0], (QualityStep{0, 1080}));
+    EXPECT_EQ(steps[1], (QualityStep{1, 1008}));
+    for (const auto& s : steps) {
+        EXPECT_NE(s.perf_mode, 2u) << "office is never needed when a smaller size is enough";
+    }
+    EXPECT_EQ(steps.back(), steps[steps.size() - 2]) << "it settles";
+}
+
+TEST(Brain, FrameRateTargetFromAnOlderBuildsOfficeStartsAtLowOneSizeSmaller) {
+    const auto dir = TempDir("fps-target-upgrade");
+    {
+        World w;
+        Rig rig(w, dir, Mode::Automatic);
+        rig.Start();
+        rig.brain->Shutdown();
+    }
+    // An older build left "autoperf 2" (office, no render size).
+    {
+        const auto path = dir / "knowledge.txt";
+        Knowledge k;
+        bool sc = false;
+        std::ifstream in{path};
+        std::stringstream ss;
+        ss << in.rdbuf();
+        ASSERT_TRUE(KnowledgeStore::Parse(ss.str(), k, sc));
+        for (auto& [key, p] : k.profiles) {
+            p.auto_perf_mode = 2;
+            p.auto_render_height = 0;
+        }
+        std::ofstream out{path, std::ios::trunc};
+        out << KnowledgeStore::Serialize(k);
+    }
+    World w;
+    Rig rig(w, dir, Mode::Automatic);
+    rig.cfg.fps_target = 30;
+    rig.cfg.perf_mode_max = 2;
+    rig.cfg.render_height_min = 720;
+    rig.brain = std::make_unique<CentralBrain>(rig.cfg, [&w] { return w.now; });
+    const auto r = rig.Start();
+    EXPECT_EQ(r.perf_mode, 1);
+    EXPECT_EQ(r.render_height, 1008u);
+    rig.brain->Shutdown();
 }
 
 TEST(Brain, FrameRateTargetIsOffUnlessThePlayerAllowsIt) {

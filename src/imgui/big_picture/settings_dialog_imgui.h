@@ -131,6 +131,16 @@ private:
     const std::vector<std::string> lowestQualityOptions = {"Keep my Performance Mode", "Low",
                                                            "Office"};
     int lowestQualitySetting = 0;
+    // Render size (Second Son, next launch): the heights of adaptive/quality_ladder.h.
+    const std::vector<u32> renderHeightValues = {1080, 1008, 936, 864, 792, 720, 648};
+    const std::vector<std::string> renderSizeOptions = {
+        "1920x1080 (100%, the game's own)", "1792x1008 (93%)", "1664x936 (87%)",
+        "1536x864 (80%)",  "1408x792 (73%)",  "1280x720 (67%)", "1152x648 (60%)"};
+    int renderSizeSetting = 0;
+    const std::vector<std::string> smallestRenderOptions = {
+        "Keep my Render Size", "1792x1008 (93%)", "1664x936 (87%)", "1536x864 (80%)",
+        "1408x792 (73%)",      "1280x720 (67%)",  "1152x648 (60%)"};
+    int smallestRenderSetting = 0;
     const std::vector<std::string> hideCursorOptions = {"Never", "Idle", "Always"};
     const std::vector<std::string> trophySideOptions = {"left", "right", "top", "bottom"};
     const std::vector<std::string> readbacksModeOptions = {"Disabled", "Relaxed", "Precise"};

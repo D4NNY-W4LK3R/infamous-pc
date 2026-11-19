@@ -1269,6 +1269,8 @@ set(INPUT src/input/controller.cpp
 # and the overlay) depends only on the standard library; tests/adaptive builds it on its own.
 set(ADAPTIVE src/adaptive/adaptive_overlay.cpp
              src/adaptive/brain.cpp
+             src/adaptive/quality_ladder.cpp
+             src/adaptive/quality_ladder.h
              src/adaptive/brain.h
              src/adaptive/contracts.cpp
              src/adaptive/contracts.h

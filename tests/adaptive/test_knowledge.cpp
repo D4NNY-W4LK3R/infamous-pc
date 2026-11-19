@@ -347,3 +347,26 @@ TEST(SelectProfile, EmulatorUpdateKeepsTheProfileAndRechecksLearnedValues) {
     EXPECT_EQ(q.sessions, 4u);
     ASSERT_FALSE(notes.empty());
 }
+
+TEST(KnowledgeStore, RenderHeightRidesOnTheAutoperfLine) {
+    Knowledge k = Sample();
+    Profile& p = k.profiles.at("abc");
+    p.auto_perf_mode = 1;
+    p.auto_render_height = 792;
+    std::string text = KnowledgeStore::Serialize(k);
+    ASSERT_NE(text.find("autoperf 1 792\n"), std::string::npos);
+    Knowledge back;
+    bool sc = false;
+    ASSERT_TRUE(KnowledgeStore::Parse(text, back, sc));
+    EXPECT_EQ(back.profiles.at("abc").auto_perf_mode, 1);
+    EXPECT_EQ(back.profiles.at("abc").auto_render_height, 792u);
+    // A line from a build before 30 (no height) still reads: the game's own size.
+    text = text.substr(0, text.rfind("checksum "));
+    const auto at = text.find("autoperf 1 792\n");
+    text.replace(at, std::string("autoperf 1 792\n").size(), "autoperf 2\n");
+    text += "checksum " + Hex64(Fnv1a64(text.data(), text.size())) + "\n";
+    Knowledge old;
+    ASSERT_TRUE(KnowledgeStore::Parse(text, old, sc));
+    EXPECT_EQ(old.profiles.at("abc").auto_perf_mode, 2);
+    EXPECT_EQ(old.profiles.at("abc").auto_render_height, 0u);
+}

@@ -154,6 +154,38 @@ std::vector<Site> PerfModeSites(std::uint32_t mode) {
     return sites;
 }
 
+// Render size (v1.1.1 SHADPS4_RENDER_HEIGHT, without its live changes): the renderer's size setup
+// FUN_8001eff00 stores the render size and the output size (the video-out buffers) from four
+// imm32 1920 / 1080; the Pro / HDR mode switch FUN_8001f0be0 re-applies them from two more. All
+// six get the new size. The 2D screen space (HUD layout, the camera's aspect) at 0x1f0403 /
+// 0x1f03fb is only checked: it stays 1920 x 1080, so the HUD keeps its size at any render size
+// (v1.1.1 s1440: a 1280x720 screen space drew the minimap 1.2x too large).
+bool IsRenderHeight(std::uint32_t h) {
+    for (const std::uint32_t v : {1080u, 1008u, 936u, 864u, 792u, 720u, 648u}) {
+        if (v == h) {
+            return true;
+        }
+    }
+    return false;
+}
+
+Bytes Le32(std::uint32_t v) {
+    return {static_cast<std::uint8_t>(v), static_cast<std::uint8_t>(v >> 8),
+            static_cast<std::uint8_t>(v >> 16), static_cast<std::uint8_t>(v >> 24)};
+}
+
+std::vector<Site> RenderSizeSites(std::uint32_t height) {
+    const std::uint32_t width = height * 16 / 9;
+    const Bytes w0 = Le32(1920), h0 = Le32(1080);
+    const Bytes w = Le32(width), h = Le32(height);
+    return {
+        {0x1eff4a, w0, w}, {0x1eff51, h0, h}, // render size
+        {0x1eff57, w0, w}, {0x1eff5e, h0, h}, // output size (video-out buffers)
+        {0x1f0d3e, w0, w}, {0x1f0d4d, h0, h}, // the mode switch's size
+        {0x1f0403, w0, {}}, {0x1f03fb, h0, {}}, // 2D screen space: checked, kept
+    };
+}
+
 Plan g_applied;
 
 } // namespace
@@ -177,13 +209,18 @@ std::vector<Write> ExpectedOriginals(const Options& options) {
     if (options.perf_mode == 1 || options.perf_mode == 2) {
         add(PerfModeSites(options.perf_mode));
     }
+    if (options.render_height != 1080 && IsRenderHeight(options.render_height)) {
+        add(RenderSizeSites(options.render_height));
+    }
     return out;
 }
 
 Plan MakePlan(const std::uint8_t* image, std::uint64_t size, const Options& options,
               const ReadableFn& readable) {
     Plan plan;
-    if (!options.particle_late_read && !options.light_one_submit && options.perf_mode == 0) {
+    const bool resize = options.render_height != 1080;
+    if (!options.particle_late_read && !options.light_one_submit && options.perf_mode == 0 &&
+        !resize) {
         plan.notes.push_back("Second Son game patches: all turned off");
         return plan;
     }
@@ -223,6 +260,19 @@ Plan MakePlan(const std::uint8_t* image, std::uint64_t size, const Options& opti
                        "2 high-res texture blocks"
                      : ": LOD 0.5, one sun-shadow cascade less, particles at quarter resolution, "
                        "no high-res texture blocks, half the pedestrians"));
+        }
+    }
+    if (resize) {
+        if (!IsRenderHeight(options.render_height)) {
+            plan.notes.push_back("render size: refused, " + std::to_string(options.render_height) +
+                                 " lines is not one of 1080 1008 936 864 792 720 648");
+        } else if (CheckSites(image, size, readable, RenderSizeSites(options.render_height),
+                              "render size", plan)) {
+            plan.render_height = options.render_height;
+            plan.render_width = options.render_height * 16 / 9;
+            plan.notes.push_back("render size: " + std::to_string(plan.render_width) + "x" +
+                                 std::to_string(plan.render_height) +
+                                 " (the picture is scaled to the window; the HUD keeps its size)");
         }
     }
     return plan;

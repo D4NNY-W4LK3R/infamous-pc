@@ -40,6 +40,7 @@ endif()
 set(SRC ${CMAKE_CURRENT_SOURCE_DIR}/../../src)
 set(ADAPTIVE_SOURCES
     ${SRC}/adaptive/brain.cpp
+    ${SRC}/adaptive/quality_ladder.cpp
     ${SRC}/adaptive/contracts.cpp
     ${SRC}/adaptive/hardware.cpp
     ${SRC}/adaptive/knobs.cpp
@@ -78,6 +79,7 @@ add_executable(adaptive_tests
     test_touch_grip.cpp
     test_camera_signature.cpp
     test_camera_cave.cpp
+    test_quality_ladder.cpp
 )
 # The camera code cave is generated with Xbyak and run by test_camera_cave on x86-64.
 target_include_directories(adaptive_tests PRIVATE ${SRC}/../externals/xbyak)
