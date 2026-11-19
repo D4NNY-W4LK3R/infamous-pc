@@ -6,6 +6,7 @@
 #include <magic_enum/magic_enum.hpp>
 
 #include "common/elf_info.h"
+#include "common/logging/log.h"
 #include "common/singleton.h"
 #include "common/string_util.h"
 #include "core/file_format/psf.h"
@@ -359,7 +360,22 @@ SaveDialogUi& SaveDialogUi::operator=(SaveDialogUi&& other) noexcept {
     return *this;
 }
 
+/// "No" on a Yes / No save-data message. Games built for firmware before 4.50 get it as a
+/// cancel, as the emulator always did; inFAMOUS Second Son (SDK 4.00) only goes on after a real
+/// "No": its "Do you want to save before loading?" treated the cancel as backing out, so the
+/// game could not be loaded without saving first (player report, build 25).
+static bool NoIsCancel() {
+    const auto& elf = ElfInfo::Instance();
+    if (elf.FirmwareVer() >= ElfInfo::FW_450) {
+        return false;
+    }
+    const auto serial = elf.GameSerial();
+    return serial != "CUSA00004" && serial != "CUSA00223";
+}
+
 void SaveDialogUi::Finish(ButtonId buttonId, Result r) {
+    LOG_INFO(Lib_SaveData, "Save data dialog closed: button {}, result {}",
+             static_cast<u32>(buttonId), static_cast<u32>(r));
     std::unique_lock lock(draw_mutex);
     if (result) {
         result->mode = this->state->mode;
@@ -697,7 +713,7 @@ void SaveDialogUi::DrawUser() {
             }
             SameLine();
             if (Button("No", BUTTON_SIZE)) {
-                if (ElfInfo::Instance().FirmwareVer() < ElfInfo::FW_450) {
+                if (NoIsCancel()) {
                     Finish(ButtonId::INVALID, Result::USER_CANCELED);
                 } else {
                     Finish(ButtonId::NO);
@@ -771,7 +787,7 @@ void SaveDialogUi::DrawSystemMessage() {
     SameLine();
     if (sys_state.show_no) {
         if (Button("No", BUTTON_SIZE)) {
-            if (ElfInfo::Instance().FirmwareVer() < ElfInfo::FW_450) {
+            if (NoIsCancel()) {
                 Finish(ButtonId::INVALID, Result::USER_CANCELED);
             } else {
                 Finish(ButtonId::NO);
