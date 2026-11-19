@@ -31,6 +31,7 @@ CONTROLS (keyboard and mouse)
   C                    melee (Square)                 F       Karmic / interact (Triangle)
   Q / E                special (L1) / heavy (R1)       U / O   L3 / R3
   R / Y                touchpad left / right           Tab     touchpad press
+  R + Y together       a thumb on each side (prompts with two fingerprints, e.g. "Move car")
   Z / X  or wheel      swipe the touchpad up / down    V / B   swipe left / right
                        (arrow prompts such as lifting wreckage)
   Enter or Esc         pause (Options)                 Arrows  D-pad

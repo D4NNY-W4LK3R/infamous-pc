@@ -468,8 +468,13 @@ void CentralBrain::Tick() {
     }
     UpdateCalibration(now);
 
-    ++ticks;
-    tick_ms_total += static_cast<double>(SteadyNs() - t0) / 1e6;
+    // A tick that spans a sleep of the PC (or a debugger pause) is not optimizer work: the field
+    // report showed 10678 ms per tick after one tick lasted hours.
+    const double tick_ms = static_cast<double>(SteadyNs() - t0) / 1e6;
+    if (tick_ms < 2000.0) {
+        ++ticks;
+        tick_ms_total += tick_ms;
+    }
     UpdateStatus(now);
 }
 

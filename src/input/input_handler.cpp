@@ -1083,17 +1083,28 @@ void ControllerOutput::FinalizeUpdate(u8 gamepad_index) {
     if (button != SDL_GAMEPAD_BUTTON_INVALID) {
         switch (button) {
         case SDL_GAMEPAD_BUTTON_TOUCHPAD_LEFT:
-            controller->SetTouchpadState(0, new_button_state, 0.25f, 0.5f);
-            controller->Button(SDLGamepadToOrbisButton(button), new_button_state);
-            break;
         case SDL_GAMEPAD_BUTTON_TOUCHPAD_CENTER:
-            controller->SetTouchpadState(0, new_button_state, 0.50f, 0.5f);
-            controller->Button(SDLGamepadToOrbisButton(button), new_button_state);
+        case SDL_GAMEPAD_BUTTON_TOUCHPAD_RIGHT: {
+            // The right side is the second finger, so holding left and right together puts a
+            // thumb on each half of the pad, as Second Son's two-fingerprint prompts ("Move car")
+            // ask. The pad stays clicked while any of the three is held.
+            static bool held[3] = {false, false, false};
+            const int side = button == SDL_GAMEPAD_BUTTON_TOUCHPAD_LEFT     ? 0
+                             : button == SDL_GAMEPAD_BUTTON_TOUCHPAD_CENTER ? 1
+                                                                            : 2;
+            const bool clicked_before = held[0] || held[1] || held[2];
+            held[side] = new_button_state;
+            const float x = side == 0 ? 0.25f : side == 1 ? 0.50f : 0.75f;
+            controller->SetTouchpadState(side == 2 ? 1 : 0, new_button_state, x, 0.5f);
+            const bool clicked = held[0] || held[1] || held[2];
+            if (clicked != clicked_before) {
+                controller->Button(SDLGamepadToOrbisButton(button), clicked);
+            }
+            if (held[0] && held[2] && new_button_state) {
+                LOG_INFO(Input, "touchpad: both sides held (two fingers)");
+            }
             break;
-        case SDL_GAMEPAD_BUTTON_TOUCHPAD_RIGHT:
-            controller->SetTouchpadState(0, new_button_state, 0.75f, 0.5f);
-            controller->Button(SDLGamepadToOrbisButton(button), new_button_state);
-            break;
+        }
         case SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_LEFT:
         case SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_RIGHT:
         case SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE_UP:
