@@ -26,6 +26,9 @@ CONTROLS (keyboard and mouse)
                        not running (spray painting, menus, special scenes) the mouse drives the
                        right stick AND the motion sensor, so the spray can's pointer follows it.
                        F7 captures / releases the mouse.
+  P                    stencil art: the spray can is held on its side, which swaps up/down
+                       and left/right of the mouse. P = sideways, P again = sideways the
+                       other way (if up/down is reversed), P again = normal (graffiti).
                        Where you aim up or down stays put for 5 s after you last moved
                        the mouse, also on ledges and rooftop edges where the game pulls
                        the camera back to level (SHADPS4_MOUSE_AIM_TILT_HOLD=0: off).

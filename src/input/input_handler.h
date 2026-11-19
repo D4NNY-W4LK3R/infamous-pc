@@ -390,6 +390,7 @@ const std::map<std::string, u32> string_to_keyboard_key_map = {
 enum class EmuKey : u8 {
     MouseAimSlower,
     MouseAimFaster,
+    SprayCanSideways, ///< P: the spray can held normally / sideways (stencil art) / other way
     Count,
 };
 /// The SDL keycode bound to an emulator key; 0 = none.

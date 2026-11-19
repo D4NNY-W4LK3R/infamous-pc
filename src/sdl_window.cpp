@@ -389,6 +389,17 @@ void WindowSDL::WaitEvent() {
                 emu_key(Input::EmuKey::MouseAimSlower) ? 0.8f : 1.25f);
             Overlay::Notice::Show(fmt::format("Mouse look: {:.1f} degrees per 100 px", sens));
         }
+        if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
+            emu_key(Input::EmuKey::SprayCanSideways)) {
+            // P: how the spray can (the motion sensor the mouse turns) is held. Stencil art is
+            // painted with the controller on its side.
+            const auto hold = Input::CycleSprayHold();
+            LOG_INFO(Input, "Spray can held {}", static_cast<int>(hold));
+            Overlay::Notice::Show(
+                hold == Input::SprayHold::Normal     ? "Spray can: held normally (graffiti)"
+                : hold == Input::SprayHold::Sideways ? "Spray can: sideways (stencil art) - P again if up/down is reversed"
+                                                     : "Spray can: sideways, the other way - P again for normal");
+        }
         OnKeyboardMouseInput(&event);
         break;
     case SDL_EVENT_GAMEPAD_ADDED:

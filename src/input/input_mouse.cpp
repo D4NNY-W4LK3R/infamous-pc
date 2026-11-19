@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -77,6 +78,37 @@ void SetMouseGyroRollMode(bool mode) {
     mouse_gyro_roll_mode = mode;
 }
 
+namespace {
+std::atomic<SprayHold> g_spray_hold{SprayHold::Normal};
+} // namespace
+
+SprayHold CycleSprayHold() {
+    const auto next = static_cast<SprayHold>((static_cast<int>(g_spray_hold.load()) + 1) % 3);
+    g_spray_hold.store(next);
+    return next;
+}
+
+void MouseToRotation(SprayHold hold, float d_x, float d_y, float out[3]) {
+    switch (hold) {
+    case SprayHold::Normal:
+        // Pitch (x) for up / down, yaw (y) for left / right.
+        out[0] = -d_y / 100;
+        out[1] = -d_x / 100;
+        break;
+    case SprayHold::Sideways:
+        // Turned on its side, right grip up: the controller's x axis points up, so turning
+        // left / right is a rotation about x and up / down one about y.
+        out[0] = -d_x / 100;
+        out[1] = d_y / 100;
+        break;
+    case SprayHold::SidewaysOtherWay:
+        out[0] = d_x / 100;
+        out[1] = -d_y / 100;
+        break;
+    }
+    out[2] = 0.0f;
+}
+
 void EmulateJoystick(GameController* controller, u32 interval) {
     float d_x = 0, d_y = 0;
     SDL_GetRelativeMouseState(&d_x, &d_y);
@@ -100,7 +132,8 @@ void EmulateJoystick(GameController* controller, u32 interval) {
             }
             return;
         }
-        float gyro_from_mouse[3] = {-d_y / 100, -d_x / 100, 0.0f};
+        float gyro_from_mouse[3];
+        MouseToRotation(g_spray_hold.load(std::memory_order_relaxed), d_x, d_y, gyro_from_mouse);
         controller->SetEmulatedRotationRate(gyro_from_mouse);
         motion_from_mouse = true;
     }
@@ -142,7 +175,8 @@ void EmulateJoystick(GameController* controller, u32 interval) {
 void EmulateGyro(GameController* controller, u32 interval) {
     float d_x = 0, d_y = 0;
     SDL_GetRelativeMouseState(&d_x, &d_y);
-    float gyro_from_mouse[3] = {-d_y / 100, -d_x / 100, 0.0f};
+    float gyro_from_mouse[3];
+    MouseToRotation(g_spray_hold.load(std::memory_order_relaxed), d_x, d_y, gyro_from_mouse);
     if (mouse_gyro_roll_mode) {
         gyro_from_mouse[1] = 0.0f;
         gyro_from_mouse[2] = -d_x / 100;

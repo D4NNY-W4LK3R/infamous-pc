@@ -328,9 +328,33 @@ std::filesystem::path DriverCachePath(const Instance& instance) {
                              props.deviceID, uuid_hex);
 }
 
+/// Written before the start-up warm-up and removed once it finished. Found at the next start, the
+/// warm-up froze or crashed last time: in inFAMOUS Second Son a driver cache saved during a session
+/// that did not end cleanly froze every later start in the warm-up until the player moved it
+/// aside (build 28). The driver cache only saves the driver work, so it is set aside then.
+std::filesystem::path WarmUpMarkerPath(const Instance& instance) {
+    auto path = DriverCachePath(instance);
+    path += ".warming";
+    return path;
+}
+
 std::vector<u8> LoadDriverCacheBlob(const Instance& instance) {
     using namespace Common::FS;
     const auto path = DriverCachePath(instance);
+    std::error_code ec;
+    if (std::filesystem::exists(WarmUpMarkerPath(instance), ec)) {
+        auto aside = path;
+        aside += ".bad";
+        std::filesystem::remove(aside, ec);
+        std::filesystem::rename(path, aside, ec);
+        LOG_WARNING(Render_Vulkan,
+                    "The last start did not finish loading the shaders: the driver's pipeline "
+                    "cache is set aside ({}) and rebuilt, so this start takes longer",
+                    ec ? "could not rename it" : aside.filename().string());
+        if (ec) {
+            return {};
+        }
+    }
     if (!std::filesystem::exists(path)) {
         return {};
     }
@@ -432,7 +456,14 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     LOG_INFO(Render_Vulkan, "Compiling pipelines on {} threads, async shader compile: {}",
              compiler->NumWorkers(), async_shader_compile);
 
+    {
+        Common::FS::IOFile marker{WarmUpMarkerPath(instance), Common::FS::FileAccessMode::Create};
+    }
     WarmUp();
+    {
+        std::error_code ec;
+        std::filesystem::remove(WarmUpMarkerPath(instance), ec);
+    }
     SaveDriverCache();
     StartDriverCacheSaver();
 }

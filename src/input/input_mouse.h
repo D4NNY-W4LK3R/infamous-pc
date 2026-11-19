@@ -66,6 +66,15 @@ bool TouchGripMotion(float xrel, float yrel);
 /// The grip button is held.
 bool TouchGripActive();
 
+/// How the emulated controller is held while the mouse turns the motion sensor (spray can).
+/// Second Son's stencil art is painted with the controller turned on its side like a spray can,
+/// which swaps the motion sensor's axes: with the normal mapping, moving the mouse up and down
+/// moved the spray sideways (player report, build 28). P cycles through the three.
+enum class SprayHold : u8 { Normal, Sideways, SidewaysOtherWay };
+SprayHold CycleSprayHold();
+/// The motion sensor's rotation rates (rad/s-ish units of the emulation) for a mouse movement.
+void MouseToRotation(SprayHold hold, float d_x, float d_y, float out[3]);
+
 // Polls the mouse for changes
 Uint32 MousePolling(void* param, Uint32 id, Uint32 interval);
 
