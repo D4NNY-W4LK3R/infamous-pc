@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2021 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "adaptive/emulator_glue.h"
 #include "common/arch.h"
 #include "common/assert.h"
 #include "core/signals.h"
@@ -16,6 +17,8 @@
 
 void assert_fail_impl() {
     Core::Signals::Instance()->RemoveHandlers();
+    // Second Son Adaptive: record the launch as a crash before the orderly shutdown below.
+    Adaptive::Glue::NoteCrash();
     Common::Singleton<Core::Emulator>::Instance()->Shutdown();
     Crash();
 }

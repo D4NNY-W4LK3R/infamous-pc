@@ -23,6 +23,7 @@
 #include "common/thread.h"
 #include "core/emulator_settings.h"
 #include "core/second_son_patches.h"
+#include "imgui/notice_layer.h"
 #include "video_core/renderer_vulkan/vk_pipeline_compiler.h"
 
 #ifdef _WIN32
@@ -39,6 +40,8 @@ namespace {
 std::unique_ptr<CentralBrain> g_brain;
 std::filesystem::path g_dir;
 UserSettings g_settings;
+std::atomic<bool> g_crashed{false};
+bool g_late_read_turned_off = false;
 std::mutex g_vram_mutex;
 std::function<std::uint64_t()> g_vram_used;
 std::function<std::uint64_t()> g_vram_budget;
@@ -198,6 +201,25 @@ void Startup(const std::string& game_serial, const std::string& app_version,
     if (!had_settings) {
         SaveSettings(settings_file, g_settings); // a commented file the user can edit
     }
+    // A launch that ended in a crash while the particle late-read was on: that patch changes
+    // when the game reads GPU-written memory, so it is the first suspect. It stays off until the
+    // player turns it back on (field: an access-tracking assertion with it on, build 19).
+    {
+        const auto marker = g_dir / "late-read-active.txt";
+        if (std::filesystem::exists(marker, ec)) {
+            std::filesystem::remove(marker, ec);
+            if (g_settings.particle_late_read) {
+                g_settings.particle_late_read = false;
+                SaveSettings(settings_file, g_settings);
+                g_late_read_turned_off = true;
+                Overlay::Notice::Show("The last launch crashed with the particle timing fix on - "
+                                      "it is off now (F3 > Graphics to turn it back on)",
+                                      8.0);
+                LOG_WARNING(Render, "Second Son: the last launch did not end cleanly with the "
+                                    "particle late-read on; it is turned off (F3 > Graphics)");
+            }
+        }
+    }
     // The frame rate limit is the user's, not the optimizer's: it applies even when the
     // optimizer is turned off.
     Common::FrameLimit::Set(g_settings.frame_limit);
@@ -324,12 +346,31 @@ void SetVramSampler(std::function<std::uint64_t()> used, std::function<std::uint
     g_vram_budget = std::move(budget);
 }
 
+void NoteCrash() {
+    g_crashed.store(true, std::memory_order_relaxed);
+}
+
+void NoteGamePatchesApplied(bool late_read) {
+    if (!late_read || g_dir.empty()) {
+        return;
+    }
+    std::ofstream(g_dir / "late-read-active.txt") << "particle late-read was on in this launch\n";
+}
+
+bool LateReadTurnedOffAfterCrash() {
+    return g_late_read_turned_off;
+}
+
 void Shutdown() {
+    if (!g_crashed.load(std::memory_order_relaxed) && !g_dir.empty()) {
+        std::error_code ec;
+        std::filesystem::remove(g_dir / "late-read-active.txt", ec);
+    }
     if (!g_brain) {
         return;
     }
     Detail::g_active.store(false, std::memory_order_release);
-    const auto report = g_brain->Shutdown();
+    const auto report = g_brain->Shutdown(g_crashed.load(std::memory_order_relaxed));
     // Live knobs are back to their defaults; leave the atomics consistent for any late reader.
     g_texture_gc_headroom_mb.store(0, std::memory_order_relaxed);
     g_upload_wake_jobs.store(8, std::memory_order_relaxed);

@@ -1072,7 +1072,7 @@ void CentralBrain::Stop() {
     }
 }
 
-std::filesystem::path CentralBrain::Shutdown() {
+std::filesystem::path CentralBrain::Shutdown(bool crashed) {
     Stop();
     if (!started || shut_down) {
         return {};
@@ -1117,9 +1117,15 @@ std::filesystem::path CentralBrain::Shutdown() {
             p->last_bottleneck = top;
         }
     }
-    knowledge.session_open = false;
-    knowledge.session_experiment.reset();
-    knowledge.session_launch_values.clear();
+    if (crashed) {
+        // Left open on purpose: the next launch treats this one as unclean and blames what was
+        // under test, exactly as if the process had vanished.
+        Note("this launch ended in a crash (emulator assertion)");
+    } else {
+        knowledge.session_open = false;
+        knowledge.session_experiment.reset();
+        knowledge.session_launch_values.clear();
+    }
     SaveKnowledge();
     UpdateStatus(now);
 

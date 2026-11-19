@@ -89,6 +89,13 @@ void SetGamePatches(const GamePatchSettings& patches);
 /// Patch decisions of this launch, one line each (empty before the game started).
 std::vector<std::string> GamePatchNotes();
 
+/// Called by the assertion handler before shutdown: the session is recorded as a crash.
+void NoteCrash();
+/// Called after the game patches went in; a crash with the late-read on turns it off next launch.
+void NoteGamePatchesApplied(bool late_read);
+/// True when this launch turned the late-read off because the last one crashed with it.
+bool LateReadTurnedOffAfterCrash();
+
 /// Frame rate limit (F3 settings > Graphics): 0 = off. Applies at once and is saved to
 /// user/adaptive/settings.ini.
 std::uint32_t FrameLimit();

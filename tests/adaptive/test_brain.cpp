@@ -358,6 +358,39 @@ TEST(Brain, CalibrationLearnsAStartupValueAcrossLaunches) {
     FAIL() << "calibration never validated the faster value; tested: " << tested;
 }
 
+TEST(Brain, AnAssertionCrashCountsLikeAVanishedProcess) {
+    // The emulator's assertion handler shuts down in order (the report is written) but tells the
+    // brain it is a crash: the next launch must still blame the experiment.
+    const auto dir = TempDir("assert-crash");
+    {
+        World w;
+        w.vram_fraction = 0.5;
+        w.dominant = StallKind::GuestWait;
+        w.dominant_ms = 15.0;
+        Rig rig(w, dir, Mode::Calibration);
+        rig.Start();
+        w.Seconds(*rig.brain, 130);
+        rig.brain->Shutdown();
+    }
+    PendingExperiment crashed;
+    {
+        World w;
+        Rig rig(w, dir, Mode::Calibration);
+        const auto r = rig.Start();
+        ASSERT_TRUE(r.experiment.has_value());
+        crashed = *r.experiment;
+        w.Seconds(*rig.brain, 30);
+        const auto report = rig.brain->Shutdown(true);
+        EXPECT_TRUE(std::filesystem::exists(report));
+    }
+    World w;
+    Rig rig(w, dir, Mode::Calibration);
+    rig.Start();
+    const Profile p = LoadProfile(dir);
+    EXPECT_EQ(p.rejected.at(crashed.knob).at(crashed.value), Outcome::Crashed);
+    EXPECT_EQ(p.unclean_sessions, 1u);
+}
+
 TEST(Brain, CrashDuringExperimentBlocksThatValueForGood) {
     const auto dir = TempDir("crash");
     // Launch 1: baseline.

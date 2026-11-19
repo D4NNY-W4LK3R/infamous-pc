@@ -166,7 +166,9 @@ public:
     void Stop();
     /// Judges this launch, saves the knowledge, closes the session, writes the report.
     /// Returns the report path (empty if it could not be written).
-    std::filesystem::path Shutdown();
+    /// crashed: the launch is ending in a crash; the session stays marked open so the next
+    /// launch blames whatever was being tested, as for a launch that never shut down.
+    std::filesystem::path Shutdown(bool crashed = false);
 
     // User controls; thread safe, executed on the next tick.
     void RequestMode(Mode mode);
