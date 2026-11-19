@@ -228,12 +228,14 @@ void WindowSDL::SetIcon(std::span<const u8> png_data) {
 
 namespace {
 
-/// The F3 settings window needs a pointer: while it is open the mouse is released (no mouse look,
-/// no stick, visible cursor) and afterwards it goes back to the mode it was in.
+/// The F3 settings window and the F1 optimizer window need a pointer: while one is open the
+/// mouse is released (no mouse look, no stick, visible cursor) and afterwards it goes back to the
+/// mode it was in.
 void HandMouseToDialogs(SDL_Window* window) {
     static bool dialog_had_mouse = false;
     static Input::MouseMode before = Input::MouseMode::Off;
-    const bool dialog = ImGuiEmuSettings::IsInGameSettingsDialogOpen();
+    const bool dialog =
+        ImGuiEmuSettings::IsInGameSettingsDialogOpen() || Adaptive::Glue::OverlayVisible();
     if (dialog == dialog_had_mouse) {
         return;
     }
@@ -265,6 +267,16 @@ void WindowSDL::WaitEvent() {
         return;
     }
     HandMouseToDialogs(window);
+
+    // F1 closes its own window even when that window has the keyboard (ImGui would otherwise
+    // swallow the key before the hotkey bindings see it).
+    if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
+        Adaptive::Glue::OverlayVisible() &&
+        Input::IsSingleKeyHotkey(HOTKEY_ADAPTIVE_OVERLAY, event.key.key)) {
+        Adaptive::Glue::ToggleOverlay();
+        HandMouseToDialogs(window);
+        return;
+    }
 
     if (Libraries::Mouse::PushSDLEvent(event) || Libraries::Keyboard::PushSDLEvent(event)) {
         return;
@@ -427,6 +439,7 @@ void WindowSDL::WaitEvent() {
         break;
     case SDL_EVENT_TOGGLE_ADAPTIVE_OVERLAY:
         Adaptive::Glue::ToggleOverlay();
+        HandMouseToDialogs(window);
         break;
     case SDL_EVENT_TOGGLE_CONTROLS_HINT:
         Overlay::ControlsHint::Toggle();

@@ -53,6 +53,8 @@ CONTROLS (keyboard and mouse)
   The F1 window shows the same status. The hook is never forced onto an unknown build.
 
 THE OPTIMIZER (F1)
+  F1 opens and closes the window. While it is open the mouse is a normal pointer for its
+  buttons; closing it gives the mouse back to the camera.
   Modes (user\adaptive\settings.ini, or the F1 window):
     observe      measures only, never changes anything
     manual       measures and recommends; you click "Try it" to test a change

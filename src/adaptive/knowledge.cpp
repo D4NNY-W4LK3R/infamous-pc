@@ -87,7 +87,7 @@ std::string_view ToString(LoadStatus status) {
     case LoadStatus::BothCorrupt:
         return "both copies corrupt, started fresh";
     case LoadStatus::SchemaChanged:
-        return "schema changed, learned values reset";
+        return "updated from an older format (results kept; very old learned values are re-checked)";
     }
     return "?";
 }

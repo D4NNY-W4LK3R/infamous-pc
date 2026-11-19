@@ -536,6 +536,26 @@ std::list<std::pair<InputEvent, bool>> pressed_keys;
 std::list<InputID> toggled_keys;
 static std::vector<BindingConnection> connections;
 
+bool IsSingleKeyHotkey(u32 hotkey, u32 sdl_key) {
+    for (const auto& c : connections) {
+        if (c.output == nullptr || c.output->button != hotkey) {
+            continue;
+        }
+        int valid = 0;
+        bool match = false;
+        for (const auto& k : c.binding.keys) {
+            if (k.IsValid()) {
+                ++valid;
+                match = match || (k.type == InputType::KeyboardMouse && k.sdl_id == sdl_key);
+            }
+        }
+        if (valid == 1 && match) {
+            return true;
+        }
+    }
+    return false;
+}
+
 GameControllers ControllerOutput::controllers =
     *Common::Singleton<Input::GameControllers>::Instance();
 

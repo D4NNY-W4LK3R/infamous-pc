@@ -236,6 +236,10 @@ void ToggleOverlay() {
     g_visible.store(!g_visible.load(std::memory_order_relaxed), std::memory_order_relaxed);
 }
 
+bool OverlayVisible() {
+    return g_visible.load(std::memory_order_relaxed);
+}
+
 void RegisterOverlay() {
     if (!g_registered) {
         g_registered = true;

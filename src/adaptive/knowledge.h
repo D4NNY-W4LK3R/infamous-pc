@@ -110,7 +110,7 @@ enum class LoadStatus : std::uint8_t {
     Loaded,         ///< main file valid
     RecoveredBackup,///< main file corrupt / torn, .bak loaded
     BothCorrupt,    ///< neither valid; started fresh, the corrupt files were set aside
-    SchemaChanged,  ///< older schema: history kept, learned values dropped for re-measurement
+    SchemaChanged,  ///< older schema, converted: history kept (v1 learned values re-checked)
 };
 std::string_view ToString(LoadStatus status);
 

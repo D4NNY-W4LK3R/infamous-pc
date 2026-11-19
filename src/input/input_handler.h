@@ -394,6 +394,9 @@ enum class EmuKey : u8 {
 };
 /// The SDL keycode bound to an emulator key; 0 = none.
 u32 GetEmuKey(EmuKey key);
+/// True when `sdl_key` alone is bound to the hotkey output `hotkey` (HOTKEY_...). Lets a window
+/// that has the keyboard (F1) still close with its own key. Main thread only.
+bool IsSingleKeyHotkey(u32 hotkey, u32 sdl_key);
 
 /// One line of the on-screen controls hint: the pad output and the keys / buttons bound to it.
 struct BindingHint {

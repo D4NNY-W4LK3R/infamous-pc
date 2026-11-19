@@ -112,8 +112,10 @@ bool LateReadTurnedOffAfterCrash();
 std::uint32_t FrameLimit();
 void SetFrameLimit(std::uint32_t fps);
 
-/// Toggles the F9 status window (drawn by the ImGui layer registered at startup).
+/// Toggles the F1 optimizer window (drawn by the ImGui layer registered at startup).
 void ToggleOverlay();
+/// True while the F1 window is open (it needs the mouse pointer, like F3).
+bool OverlayVisible();
 /// Registers the overlay layer; called by the presenter after ImGui is up.
 void RegisterOverlay();
 
