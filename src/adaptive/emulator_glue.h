@@ -86,6 +86,17 @@ struct GamePatchSettings {
 GamePatchSettings GamePatches();
 /// Saves them for the next launch.
 void SetGamePatches(const GamePatchSettings& patches);
+/// The performance mode this launch uses: the frame-rate target's choice, else the setting.
+std::uint32_t EffectivePerfMode();
+
+/// Frame-rate target (F3 > Graphics): the optimizer picks the performance mode per launch, from
+/// the player's own choice down to lowest_quality (0 = it may not lower quality).
+struct FpsTarget {
+    std::uint32_t fps = 0;
+    std::uint32_t lowest_quality = 0;
+};
+FpsTarget GetFpsTarget();
+void SetFpsTarget(const FpsTarget& target);
 /// Patch decisions of this launch, one line each (empty before the game started).
 std::vector<std::string> GamePatchNotes();
 

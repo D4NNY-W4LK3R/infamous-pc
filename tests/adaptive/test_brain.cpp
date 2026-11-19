@@ -44,6 +44,10 @@ struct World {
     double dominant_ms = 8.0;
     /// extra per-frame changes (e.g. a shader-compile stall); returns extra frame time in ms
     std::function<double(World&, FrameSample&)> decorate = [](World&, FrameSample&) { return 0.0; };
+    /// Draw count per frame (0 = not reported, as in the older tests) and whether the player is
+    /// pressing keys this second: together they make the scene (gameplay, cutscene, menu).
+    std::function<std::uint32_t(World&)> draws = [](World&) { return 0u; };
+    bool input = false;
 
     HardwareInfo Hw() const {
         HardwareInfo hw;
@@ -72,8 +76,13 @@ struct World {
     void Seconds(CentralBrain& brain, int seconds) {
         std::normal_distribution<double> noise(0.0, 0.6);
         for (int s = 0; s < seconds; ++s) {
+            if (input) {
+                brain.NoteInput();
+            }
             for (int i = 0; i < 30; ++i) {
                 FrameSample f;
+                f.draws = draws(*this);
+                f.dispatches = f.draws / 4;
                 f.stall_ms[static_cast<std::size_t>(dominant)] = static_cast<float>(dominant_ms);
                 const double extra = decorate(*this, f);
                 const double ms =
@@ -602,4 +611,247 @@ TEST(Brain, DiagnosisPicksTheDominantCost) {
     s.stall_ms_per_frame[static_cast<std::size_t>(StallKind::PipelineWait)] = 8.0;
     EXPECT_EQ(CentralBrain::Diagnose(s, 0.5, true, c), Bottleneck::Warmup);
     EXPECT_EQ(CentralBrain::Diagnose(s, 0.5, false, c), Bottleneck::ShaderCompile);
+}
+
+TEST(Brain, ABusyGraphicsCardIsNamedEvenWithVramOverBudget) {
+    // Field (GTX 1650): VRAM at 140% of budget and the card busy 31 of 33 ms a frame.
+    Snapshot s;
+    s.window_frames = 300;
+    s.in_gameplay = true;
+    s.frame_ms_p50 = 33.0;
+    s.stall_ms_per_frame[static_cast<std::size_t>(StallKind::ReadbackWait)] = 30.0;
+    s.gpu_busy_ms_p50 = 31.0;
+    double c = 0;
+    EXPECT_EQ(CentralBrain::Diagnose(s, 1.4, false, c), Bottleneck::HostGpuBound);
+    s.gpu_busy_ms_p50 = 18.0; // a 30 fps limit with room to spare: not the card
+    EXPECT_EQ(CentralBrain::Diagnose(s, 1.4, false, c), Bottleneck::MemoryPressure);
+}
+
+
+namespace {
+SecondSummary SecondWith(std::uint32_t draws, bool still) {
+    SecondSummary s;
+    s.frames = 30;
+    s.draws_median = draws;
+    s.dispatches_median = draws / 4;
+    s.same_every_frame = still;
+    s.signature = still ? (1ull << 63) | draws : 0;
+    return s;
+}
+/// A moving scene: the draw count changes a little from frame to frame.
+std::uint32_t Moving(World& w) {
+    return 3000u + static_cast<std::uint32_t>(w.frame % 7);
+}
+} // namespace
+
+TEST(Brain, ScenesAreClassifiedFromDrawsInputAndStillness) {
+    EXPECT_EQ(CentralBrain::ClassifySecond(SecondWith(0, false), true, 0), Scene::Unknown);
+    EXPECT_EQ(CentralBrain::ClassifySecond(SecondWith(12, false), false, 0), Scene::Loading);
+    EXPECT_EQ(CentralBrain::ClassifySecond(SecondWith(3000, false), true, 0), Scene::Gameplay);
+    EXPECT_EQ(CentralBrain::ClassifySecond(SecondWith(3000, false), false, 0), Scene::Cutscene);
+    EXPECT_EQ(CentralBrain::ClassifySecond(SecondWith(4347, true), false, 2), Scene::Cutscene)
+        << "two still seconds are not yet a menu";
+    EXPECT_EQ(CentralBrain::ClassifySecond(SecondWith(4347, true), true, 3), Scene::Menu)
+        << "a still picture is a menu or pause even while keys are pressed";
+}
+
+TEST(Brain, ACutscenePausesATestInsteadOfCancellingIt) {
+    World w;
+    w.draws = Moving;
+    w.input = true;
+    w.frame_ms = [](World& x) { return x.tex_headroom.load() >= 256 ? 30.5 : 33.3; };
+    const auto dir = TempDir("cutscene-pause");
+    Rig rig(w, dir, Mode::Automatic);
+    rig.Start();
+    w.Seconds(*rig.brain, 50); // warm up; the test starts
+    ASSERT_TRUE(rig.brain->Status().evaluation.has_value());
+    // A long cutscene: no input, and slower frames that must not count for either side.
+    w.input = false;
+    const auto gameplay_ms = w.frame_ms;
+    w.frame_ms = [](World&) { return 45.0; };
+    w.Seconds(*rig.brain, 90);
+    EXPECT_TRUE(rig.brain->Status().evaluation.has_value()) << "paused, not cancelled";
+    w.input = true;
+    w.frame_ms = gameplay_ms;
+    w.Seconds(*rig.brain, 120);
+    rig.brain->Shutdown();
+    const Profile p = LoadProfile(dir);
+    ASSERT_FALSE(p.history.empty());
+    EXPECT_EQ(p.history.front().outcome, Outcome::Improved);
+    EXPECT_EQ(p.validated.at(KnobId::TextureGcHeadroomMb), 256);
+}
+
+TEST(Brain, ATestCutShortByQuittingContinuesNextSession) {
+    const auto dir = TempDir("resume");
+    const auto fast = [](World& x) { return x.tex_headroom.load() >= 256 ? 30.5 : 33.3; };
+    {
+        World w;
+        w.draws = Moving;
+        w.input = true;
+        w.frame_ms = fast;
+        Rig rig(w, dir, Mode::Automatic);
+        rig.Start();
+        w.Seconds(*rig.brain, 60); // the test runs about 30 s, then the player quits
+        ASSERT_TRUE(rig.brain->Status().evaluation.has_value());
+        rig.brain->Shutdown();
+        const Profile p = LoadProfile(dir);
+        ASSERT_TRUE(p.partial.has_value());
+        EXPECT_GT(p.partial->a_median.size() + p.partial->b_median.size(), 10u);
+        EXPECT_TRUE(p.history.empty()) << "nothing is judged on half a test";
+    }
+    World w;
+    w.draws = Moving;
+    w.input = true;
+    w.frame_ms = fast;
+    Rig rig(w, dir, Mode::Automatic);
+    rig.Start();
+    w.Seconds(*rig.brain, 120);
+    rig.brain->Shutdown();
+    const Profile p = LoadProfile(dir);
+    EXPECT_FALSE(p.partial.has_value());
+    ASSERT_FALSE(p.history.empty());
+    EXPECT_EQ(p.history.front().outcome, Outcome::Improved);
+    EXPECT_EQ(p.validated.at(KnobId::TextureGcHeadroomMb), 256);
+}
+
+TEST(Brain, SceneSwitchesAreMeasured) {
+    World w;
+    w.draws = Moving;
+    w.input = true;
+    const auto dir = TempDir("switches");
+    Rig rig(w, dir, Mode::Observe);
+    rig.Start();
+    w.Seconds(*rig.brain, 30);
+    // Loading screen with a long freeze at its start (a scene load).
+    w.draws = [](World&) { return 5u; };
+    int first = 1;
+    w.spike = [&first](World&) { return first-- > 0 ? 900.0 : 0.0; };
+    w.Seconds(*rig.brain, 6);
+    w.draws = Moving;
+    w.Seconds(*rig.brain, 10);
+    const auto sw = rig.brain->SceneSwitches();
+    ASSERT_GE(sw.size(), 2u);
+    EXPECT_EQ(sw[0].from, Scene::Gameplay);
+    EXPECT_EQ(sw[0].to, Scene::Loading);
+    EXPECT_GE(sw[0].worst_ms, 900.0);
+    rig.brain->Shutdown();
+}
+
+TEST(Brain, AutomaticModeTestsStartupValuesOnPauseScreens) {
+    // The player plays, and pauses now and then on the same spot (a still picture). Launch 1
+    // learns how that pause screen runs; launch 2 tests one start-up value and is judged only on
+    // the same pause screen.
+    const auto dir = TempDir("auto-startup");
+    const auto play = [](World& w, CentralBrain& b, int rounds) {
+        for (int i = 0; i < rounds; ++i) {
+            w.input = true;
+            w.draws = Moving;
+            w.Seconds(b, 20);
+            w.input = false;
+            w.draws = [](World&) { return 4347u; }; // paused: the same picture every frame
+            w.Seconds(b, 30);
+        }
+    };
+    const auto frame = [](World& x) {
+        const bool paused = x.draws(x) == 4347u;
+        const bool testing = !x.env.empty();
+        return paused ? (testing ? 18.0 : 20.0) : 33.3;
+    };
+    {
+        World w;
+        w.frame_ms = frame;
+        Rig rig(w, dir, Mode::Automatic);
+        const auto r = rig.Start();
+        EXPECT_FALSE(r.experiment.has_value()) << "no baseline yet";
+        play(w, *rig.brain, 7);
+        rig.brain->Shutdown();
+        const Profile p = LoadProfile(dir);
+        EXPECT_GE(p.baseline_seconds_ms.size(), 90u);
+        EXPECT_TRUE(std::all_of(p.baseline_signatures.begin(), p.baseline_signatures.end(),
+                                [](std::uint64_t s) { return s != 0; }));
+    }
+    World w;
+    w.frame_ms = frame;
+    Rig rig(w, dir, Mode::Automatic);
+    const auto r = rig.Start();
+    ASSERT_TRUE(r.experiment.has_value());
+    play(w, *rig.brain, 7);
+    rig.brain->Shutdown();
+    const Profile p = LoadProfile(dir);
+    ASSERT_FALSE(p.history.empty());
+    const auto& rec = p.history.back();
+    EXPECT_EQ(rec.method, "launch-ab-still");
+    EXPECT_EQ(rec.outcome, Outcome::Improved);
+    EXPECT_EQ(p.validated.at(r.experiment->knob), r.experiment->value);
+}
+
+TEST(Brain, StartupTestsNeverCompareDifferentScenes) {
+    // Launch 2 pauses somewhere else (another still picture, much heavier): nothing matches the
+    // baseline, so nothing is judged, however different the numbers are.
+    const auto dir = TempDir("auto-startup-other");
+    const auto play = [](World& w, CentralBrain& b, std::uint32_t picture) {
+        for (int i = 0; i < 7; ++i) {
+            w.input = true;
+            w.draws = Moving;
+            w.Seconds(b, 20);
+            w.input = false;
+            w.draws = [picture](World&) { return picture; };
+            w.Seconds(b, 30);
+        }
+    };
+    {
+        World w;
+        w.frame_ms = [](World& x) { return x.draws(x) == 4347u ? 20.0 : 33.3; };
+        Rig rig(w, dir, Mode::Automatic);
+        rig.Start();
+        play(w, *rig.brain, 4347u);
+        rig.brain->Shutdown();
+    }
+    World w;
+    w.frame_ms = [](World& x) { return x.draws(x) == 9000u ? 45.0 : 33.3; };
+    Rig rig(w, dir, Mode::Automatic);
+    const auto r = rig.Start();
+    ASSERT_TRUE(r.experiment.has_value());
+    play(w, *rig.brain, 9000u);
+    rig.brain->Shutdown();
+    const Profile p = LoadProfile(dir);
+    ASSERT_FALSE(p.history.empty());
+    EXPECT_EQ(p.history.back().outcome, Outcome::Abandoned);
+    EXPECT_TRUE(p.rejected.empty());
+    EXPECT_TRUE(p.validated.empty());
+}
+
+TEST(Brain, FrameRateTargetLowersQualityOnlyWithinTheLimit) {
+    const auto dir = TempDir("fps-target");
+    std::vector<std::int32_t> modes;
+    for (int launch = 0; launch < 4; ++launch) {
+        World w;
+        w.draws = Moving;
+        w.input = true;
+        Rig rig(w, dir, Mode::Automatic);
+        rig.cfg.fps_target = 30;
+        rig.cfg.perf_mode_floor = 0;
+        rig.cfg.perf_mode_max = 2;
+        // Re-create the brain with the target settings (the Rig built it with the defaults).
+        rig.brain = std::make_unique<CentralBrain>(rig.cfg, [&w] { return w.now; });
+        const auto r = rig.Start();
+        modes.push_back(r.perf_mode);
+        // 19 fps at full quality, 24 at low, 31 at office (the game draws less each step).
+        const double ms = r.perf_mode == 0 ? 52.0 : r.perf_mode == 1 ? 41.0 : 32.5;
+        w.frame_ms = [ms](World&) { return ms; };
+        w.Seconds(*rig.brain, 200);
+        rig.brain->Shutdown();
+    }
+    EXPECT_EQ(modes, (std::vector<std::int32_t>{0, 1, 2, 2})) << "never beyond office";
+}
+
+TEST(Brain, FrameRateTargetIsOffUnlessThePlayerAllowsIt) {
+    World w;
+    const auto dir = TempDir("fps-target-off");
+    Rig rig(w, dir, Mode::Automatic);
+    rig.cfg.fps_target = 30;
+    rig.cfg.perf_mode_max = 0; // no quality reduction allowed
+    rig.brain = std::make_unique<CentralBrain>(rig.cfg, [&w] { return w.now; });
+    EXPECT_EQ(rig.Start().perf_mode, -1);
+    rig.brain->Shutdown();
 }

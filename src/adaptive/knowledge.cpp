@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -120,7 +121,27 @@ std::string KnowledgeStore::Serialize(const Knowledge& k) {
         for (std::size_t i = 0; i < p.baseline_seconds_ms.size(); ++i) {
             const double p99 =
                 i < p.baseline_seconds_p99_ms.size() ? p.baseline_seconds_p99_ms[i] : 0.0;
-            o << "baseline " << Num(p.baseline_seconds_ms[i]) << ' ' << Num(p99) << '\n';
+            const std::uint64_t sig =
+                i < p.baseline_signatures.size() ? p.baseline_signatures[i] : 0;
+            o << "baseline " << Num(p.baseline_seconds_ms[i]) << ' ' << Num(p99) << ' ' << sig
+              << '\n';
+        }
+        if (p.auto_perf_mode >= 0) {
+            o << "autoperf " << p.auto_perf_mode << '\n';
+        }
+        if (p.partial) {
+            const auto& e = *p.partial;
+            o << "partial " << Escape(e.knob) << ' ' << e.old_value << ' ' << e.new_value << ' '
+              << e.a_hitches << ' ' << e.b_hitches << ' ' << e.started_unix << ' ' << e.sessions
+              << '\n';
+            for (std::size_t i = 0; i < e.a_median.size(); ++i) {
+                o << "partialsec A " << Num(e.a_median[i]) << ' '
+                  << Num(i < e.a_p99.size() ? e.a_p99[i] : 0.0) << '\n';
+            }
+            for (std::size_t i = 0; i < e.b_median.size(); ++i) {
+                o << "partialsec B " << Num(e.b_median[i]) << ' '
+                  << Num(i < e.b_p99.size() ? e.b_p99[i] : 0.0) << '\n';
+            }
         }
         for (const auto& e : p.history) {
             o << "history " << Escape(e.knob) << ' ' << e.baseline_value << ' ' << e.value << ' '
@@ -146,6 +167,62 @@ std::string KnowledgeStore::Serialize(const Knowledge& k) {
     body += "checksum " + Hex64(Fnv1a64(body.data(), body.size())) + "\n";
     return body;
 }
+
+namespace {
+/// Schema < 3 kept one profile per emulator build. They are merged into one profile per hardware +
+/// game: the most recently used one is the base (its learned values, baseline and fingerprint);
+/// the others add their history, session counts and crash blocks (a value that crashed stays
+/// blocked); their regressions are not carried over, since they were measured on older builds.
+std::map<std::string, Profile> MergeIntoV3Keys(std::map<std::string, Profile> old,
+                                               std::string& session_profile) {
+    const auto latest = [](const Profile& p) {
+        std::int64_t t = 0;
+        for (const auto& e : p.history) {
+            t = std::max(t, e.unix_time);
+        }
+        return t;
+    };
+    std::map<std::string, std::vector<std::pair<std::string, Profile>>> groups;
+    for (auto& [key, p] : old) {
+        groups[p.fingerprint.ProfileKey()].emplace_back(key, std::move(p));
+    }
+    std::map<std::string, Profile> out;
+    for (auto& [new_key, members] : groups) {
+        std::stable_sort(members.begin(), members.end(), [&](const auto& a, const auto& b) {
+            const auto ta = latest(a.second), tb = latest(b.second);
+            return ta != tb ? ta > tb : a.second.sessions > b.second.sessions;
+        });
+        Profile merged = members.front().second;
+        for (std::size_t i = 1; i < members.size(); ++i) {
+            const Profile& m = members[i].second;
+            for (const auto& [knob, values] : m.rejected) {
+                for (const auto& [v, outcome] : values) {
+                    if (outcome == Outcome::Crashed) {
+                        merged.rejected[knob][v] = Outcome::Crashed;
+                    }
+                }
+            }
+            merged.history.insert(merged.history.end(), m.history.begin(), m.history.end());
+            merged.sessions += m.sessions;
+            merged.unclean_sessions += m.unclean_sessions;
+        }
+        std::stable_sort(merged.history.begin(), merged.history.end(),
+                         [](const auto& a, const auto& b) { return a.unix_time < b.unix_time; });
+        if (merged.history.size() > Profile::MaxHistory) {
+            merged.history.erase(merged.history.begin(),
+                                 merged.history.end() -
+                                     static_cast<std::ptrdiff_t>(Profile::MaxHistory));
+        }
+        for (const auto& [old_key, _] : members) {
+            if (old_key == session_profile) {
+                session_profile = new_key;
+            }
+        }
+        out[new_key] = std::move(merged);
+    }
+    return out;
+}
+} // namespace
 
 bool KnowledgeStore::Parse(const std::string& text, Knowledge& out, bool& schema_changed) {
     schema_changed = false;
@@ -256,8 +333,35 @@ bool KnowledgeStore::Parse(const std::string& text, Knowledge& out, bool& schema
             if (!(ls >> m >> p)) {
                 return false;
             }
+            std::uint64_t sig = 0;
+            if (!(ls >> sig)) {
+                sig = 0; // schema 2 lines carry no signature
+            }
             cur->baseline_seconds_ms.push_back(m);
             cur->baseline_seconds_p99_ms.push_back(p);
+            cur->baseline_signatures.push_back(sig);
+        } else if (tag == "autoperf" && cur) {
+            if (!(ls >> cur->auto_perf_mode) || cur->auto_perf_mode < -1 ||
+                cur->auto_perf_mode > 2) {
+                return false;
+            }
+        } else if (tag == "partial" && cur) {
+            PartialEvaluation e;
+            if (!(ls >> a >> e.old_value >> e.new_value >> e.a_hitches >> e.b_hitches >>
+                  e.started_unix >> e.sessions) ||
+                !Unescape(a, e.knob)) {
+                return false;
+            }
+            cur->partial = std::move(e);
+        } else if (tag == "partialsec" && cur && cur->partial) {
+            std::string side;
+            double m = 0.0, p = 0.0;
+            if (!(ls >> side >> m >> p) || (side != "A" && side != "B")) {
+                return false;
+            }
+            auto& e = *cur->partial;
+            (side == "A" ? e.a_median : e.b_median).push_back(m);
+            (side == "A" ? e.a_p99 : e.b_p99).push_back(p);
         } else if (tag == "history" && cur) {
             ExperimentRecord e;
             std::string outcome, drv, method;
@@ -298,7 +402,10 @@ bool KnowledgeStore::Parse(const std::string& text, Knowledge& out, bool& schema
             return false; // unknown line: refuse rather than guess
         }
     }
-    if (schema_changed) {
+    if (schema_changed && loaded_version < 3) {
+        k.profiles = MergeIntoV3Keys(std::move(k.profiles), k.session_profile);
+    }
+    if (schema_changed && loaded_version < 2) {
         // Keep history and crash knowledge (facts about what happened), drop learned values.
         for (auto& [key, p] : k.profiles) {
             for (const auto& [knob, v] : p.validated) {
@@ -308,15 +415,15 @@ bool KnowledgeStore::Parse(const std::string& text, Knowledge& out, bool& schema
             p.baseline_seconds_ms.clear();
             p.baseline_seconds_p99_ms.clear();
             p.revalidation_reason = "knowledge schema changed";
-            if (loaded_version < 2) {
-                // v1 could block a value after a single hitch second; give those another chance.
-                for (auto& [knob, values] : p.rejected) {
-                    std::erase_if(values,
-                                  [](const auto& kv) { return kv.second == Outcome::Regressed; });
-                }
-                std::erase_if(p.rejected, [](const auto& kv) { return kv.second.empty(); });
+            // v1 could block a value after a single hitch second; give those another chance.
+            for (auto& [knob, values] : p.rejected) {
+                std::erase_if(values,
+                              [](const auto& kv) { return kv.second == Outcome::Regressed; });
             }
+            std::erase_if(p.rejected, [](const auto& kv) { return kv.second.empty(); });
         }
+    }
+    if (schema_changed) {
         k.schema_version = KnowledgeSchemaVersion;
     }
     out = std::move(k);
@@ -421,7 +528,7 @@ Profile& SelectProfile(Knowledge& k, const Fingerprint& current, std::vector<std
     if (inserted) {
         p.fingerprint = current;
         notes.push_back("new optimization profile " + key + " (no earlier results for this "
-                        "hardware + game build + emulator build)");
+                        "hardware + game build)");
         // Mention what changed relative to the most recent other profile, if any.
         for (const auto& [other_key, other] : k.profiles) {
             if (other_key == key) {
@@ -450,7 +557,30 @@ Profile& SelectProfile(Knowledge& k, const Fingerprint& current, std::vector<std
         p.revalidation_reason = "GPU driver changed";
         p.baseline_seconds_ms.clear();
         p.baseline_seconds_p99_ms.clear();
+        p.baseline_signatures.clear();
+        p.partial.reset();
         p.fingerprint.driver = current.driver;
+    }
+    if (p.fingerprint.emulator != current.emulator) {
+        // An emulator update keeps everything learned, but a value that won on the old build is
+        // re-checked before it is trusted again; what crashed or clearly lost stays blocked, and
+        // an unfinished test starts over (its seconds were measured on the old build).
+        notes.push_back("emulator build changed (" + p.fingerprint.emulator + " -> " +
+                        current.emulator + "): " + std::to_string(p.validated.size()) +
+                        " learned value(s) are re-checked before use; blocked values stay "
+                        "blocked");
+        for (const auto& [knob, v] : p.validated) {
+            p.revalidate[knob] = v;
+        }
+        p.validated.clear();
+        if (!p.revalidate.empty()) {
+            p.revalidation_reason = "emulator build changed";
+        }
+        p.baseline_seconds_ms.clear();
+        p.baseline_seconds_p99_ms.clear();
+        p.baseline_signatures.clear();
+        p.partial.reset();
+        p.fingerprint.emulator = current.emulator;
     }
     return p;
 }

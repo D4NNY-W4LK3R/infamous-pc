@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <random>
+#include <sstream>
 
 #include <gtest/gtest.h>
 
@@ -169,7 +170,11 @@ TEST(KnowledgeStore, SchemaChangeKeepsHistoryDropsLearnedValues) {
     bool sc = false;
     ASSERT_TRUE(KnowledgeStore::Parse(text, k, sc));
     EXPECT_TRUE(sc);
-    const Profile& p = k.profiles.at("abc");
+    // Old files are keyed per emulator build; schema 3 files them by hardware + game.
+    const std::string key = Sample().profiles.at("abc").fingerprint.ProfileKey();
+    ASSERT_EQ(k.profiles.size(), 1u);
+    EXPECT_EQ(k.session_profile, key);
+    const Profile& p = k.profiles.at(key);
     EXPECT_TRUE(p.validated.empty());
     EXPECT_EQ(p.revalidate.at("SS_TEXCACHE_GC_HEADROOM_MB"), 256);
     EXPECT_EQ(p.history.size(), 1u);
@@ -234,4 +239,111 @@ TEST(Hardware, NvidiaDriverVersionDecoding) {
     // 576.80 is packed by NVIDIA as (576 << 22) | (80 << 14).
     EXPECT_EQ(DecodeDriverVersion(0x10de, (576u << 22) | (80u << 14)), "576.80.0.0");
     EXPECT_EQ(DecodeDriverVersion(0x1002, (2u << 22) | (0u << 12) | 300u), "2.0.300");
+}
+
+
+namespace {
+std::string AsSchema(std::string text, std::uint32_t version) {
+    text = text.substr(0, text.rfind("checksum "));
+    const std::string header =
+        "SSADAPTIVE-KNOWLEDGE " + std::to_string(KnowledgeSchemaVersion) + "\n";
+    text.replace(0, header.size(), "SSADAPTIVE-KNOWLEDGE " + std::to_string(version) + "\n");
+    // schema 2 baseline lines had two fields
+    std::string out;
+    std::istringstream in(text);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (version < 3 && line.rfind("baseline ", 0) == 0) {
+            line = line.substr(0, line.rfind(' '));
+        }
+        out += line + "\n";
+    }
+    out += "checksum " + Hex64(Fnv1a64(out.data(), out.size())) + "\n";
+    return out;
+}
+} // namespace
+
+TEST(KnowledgeStore, V2ProfilesOfSeveralEmulatorBuildsMergeIntoOne) {
+    Knowledge k = Sample();
+    Profile older = k.profiles.at("abc");
+    older.fingerprint.emulator = "0.19.0 older";
+    older.validated.clear();
+    older.rejected.clear();
+    older.rejected["SS_UPLOAD_WAKE_JOBS"][4] = Outcome::Crashed;
+    older.rejected["SS_UPLOAD_WAKE_JOBS"][16] = Outcome::Regressed;
+    older.sessions = 3;
+    older.history.front().unix_time = 1790000000; // older than the sample's
+    k.profiles["old-build"] = older;
+    Knowledge back;
+    bool sc = false;
+    ASSERT_TRUE(KnowledgeStore::Parse(AsSchema(KnowledgeStore::Serialize(k), 2), back, sc));
+    EXPECT_TRUE(sc);
+    ASSERT_EQ(back.profiles.size(), 1u);
+    const Profile& p = back.profiles.begin()->second;
+    EXPECT_EQ(p.fingerprint.emulator, "0.19.1 hybrid") << "the newest profile is the base";
+    EXPECT_EQ(p.validated.at("SS_TEXCACHE_GC_HEADROOM_MB"), 256) << "v2 values are kept";
+    EXPECT_EQ(p.sessions, 10u);
+    EXPECT_EQ(p.history.size(), 2u);
+    EXPECT_LT(p.history.front().unix_time, p.history.back().unix_time);
+    EXPECT_EQ(p.rejected.at("SS_UPLOAD_WAKE_JOBS").at(4), Outcome::Crashed);
+    EXPECT_FALSE(p.rejected.at("SS_UPLOAD_WAKE_JOBS").contains(16))
+        << "older builds' regressions are not carried over";
+    EXPECT_EQ(p.baseline_signatures, (std::vector<std::uint64_t>{0, 0, 0}));
+}
+
+TEST(KnowledgeStore, PartialTestSignaturesAndTargetRoundTrip) {
+    Knowledge k = Sample();
+    Profile& p = k.profiles.at("abc");
+    p.baseline_signatures = {11, 22, 33};
+    p.auto_perf_mode = 2;
+    PartialEvaluation e;
+    e.knob = "SS_UPLOAD_WAKE_JOBS";
+    e.old_value = 8;
+    e.new_value = 4;
+    e.a_median = {33.0, 33.5};
+    e.a_p99 = {40.0, 41.0};
+    e.b_median = {32.0};
+    e.b_p99 = {39.0};
+    e.a_hitches = 1;
+    e.started_unix = 1795000000;
+    e.sessions = 2;
+    p.partial = e;
+    Knowledge back;
+    bool sc = false;
+    ASSERT_TRUE(KnowledgeStore::Parse(KnowledgeStore::Serialize(k), back, sc));
+    EXPECT_FALSE(sc);
+    const Profile& q = back.profiles.at("abc");
+    EXPECT_EQ(q.baseline_signatures, p.baseline_signatures);
+    EXPECT_EQ(q.auto_perf_mode, 2);
+    ASSERT_TRUE(q.partial.has_value());
+    EXPECT_EQ(q.partial->knob, "SS_UPLOAD_WAKE_JOBS");
+    EXPECT_EQ(q.partial->a_median, e.a_median);
+    EXPECT_EQ(q.partial->b_p99, e.b_p99);
+    EXPECT_EQ(q.partial->sessions, 2u);
+}
+
+TEST(SelectProfile, EmulatorUpdateKeepsTheProfileAndRechecksLearnedValues) {
+    Knowledge k;
+    Fingerprint fp{"hw", "1.0", "game", "build-18"};
+    std::vector<std::string> notes;
+    Profile& p = SelectProfile(k, fp, notes);
+    p.validated["A"] = 1;
+    p.rejected["B"][2] = Outcome::Regressed;
+    p.rejected["C"][3] = Outcome::Crashed;
+    p.partial = PartialEvaluation{};
+    p.sessions = 4;
+    fp.emulator = "build-21";
+    notes.clear();
+    Profile& q = SelectProfile(k, fp, notes);
+    EXPECT_EQ(&p, &q) << "same profile, not a new empty one";
+    EXPECT_EQ(k.profiles.size(), 1u);
+    EXPECT_TRUE(q.validated.empty());
+    EXPECT_EQ(q.revalidate.at("A"), 1);
+    EXPECT_EQ(q.revalidation_reason, "emulator build changed");
+    EXPECT_EQ(q.rejected.at("B").at(2), Outcome::Regressed);
+    EXPECT_EQ(q.rejected.at("C").at(3), Outcome::Crashed);
+    EXPECT_FALSE(q.partial.has_value());
+    EXPECT_EQ(q.fingerprint.emulator, "build-21");
+    EXPECT_EQ(q.sessions, 4u);
+    ASSERT_FALSE(notes.empty());
 }

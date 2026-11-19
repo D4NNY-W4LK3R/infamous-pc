@@ -34,7 +34,10 @@ inline constexpr std::uint32_t ContractVersionMinor = 0;
 /// reinterpreted: their learned values are dropped and re-measured (their history is kept).
 /// 2: emergency rollback needs sustained evidence; v1 "Regressed" blocks (often from one
 ///    hitch) are forgiven on load. Crash blocks are kept.
-inline constexpr std::uint32_t KnowledgeSchemaVersion = 2;
+/// 3: profiles are keyed by hardware + game only (an emulator update re-checks learned values
+///    instead of starting an empty profile); baseline seconds carry a scene signature; an
+///    unfinished live A/B test is kept for the next session; the fps-target choice is kept.
+inline constexpr std::uint32_t KnowledgeSchemaVersion = 3;
 
 /// Optimization control mode, chosen by the user (Architecture v1.0 sec. 3).
 enum class Mode : std::uint8_t {
@@ -152,6 +155,17 @@ enum class Bottleneck : std::uint8_t {
 };
 std::string_view ToString(Bottleneck bottleneck);
 
+/// What the game is showing, decided per second (Architecture v1.1: compare like with like).
+enum class Scene : std::uint8_t {
+    Unknown,  ///< no draw counts reported (tests, very early frames): treated like gameplay
+    Gameplay, ///< the player is giving input
+    Cutscene, ///< a moving scene without input: a cutscene, or the player watching
+    Menu,     ///< a still picture: pause or main menu, a still screen (same draws every frame)
+    Loading,  ///< almost nothing drawn: a loading screen or a video
+};
+inline constexpr std::size_t NumScenes = 5;
+std::string_view ToString(Scene scene);
+
 struct Snapshot {
     std::uint64_t timestamp_ns = 0;
     std::uint64_t window_frames = 0;
@@ -167,6 +181,8 @@ struct Snapshot {
     Bottleneck bottleneck = Bottleneck::Unknown;
     double bottleneck_confidence = 0.0; ///< 0..1
     bool in_gameplay = false;           ///< frames flowing steadily (not a load screen / pause)
+    Scene scene = Scene::Unknown;       ///< scene of the latest complete second
+    double gpu_busy_ms_p50 = 0.0;       ///< median host GPU time per frame, 0 = not measured
 };
 
 /// A mini-brain's request. It names a knob of its own domain; the Safety Gate decides.

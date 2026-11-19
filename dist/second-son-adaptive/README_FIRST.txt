@@ -57,16 +57,26 @@ THE OPTIMIZER (F1)
     observe      measures only, never changes anything
     manual       measures and recommends; you click "Try it" to test a change
     automatic    (default) applies safe live changes during gameplay, measures each one in alternating
-                 15-second blocks, keeps only real improvements, undoes regressions at once,
-                 and reuses what it learned in earlier sessions
-    calibration  as automatic, plus tests ONE start-up setting per launch. For good numbers:
-                 start the game, let it reach the title screen, then do not touch anything
-                 for 2 minutes. Quit normally (close the window) afterwards.
+                 10-second blocks, keeps only real improvements, undoes regressions at once,
+                 and reuses what it learned in earlier sessions. It also tests ONE start-up
+                 setting per launch, judged only on pause / menu screens it has seen before
+                 (pausing for a minute now and then gives it the seconds it needs).
+    calibration  as automatic, but start-up tests use the title screen: start the game, let it
+                 reach the title screen, then do not touch anything for 2 minutes.
+  It knows what is on screen: gameplay (you are pressing keys), cutscene / watching, menu /
+  pause (a still picture), loading / video. A test compares gameplay with gameplay only; a
+  cutscene or the menu pauses it, and quitting keeps its seconds for the next session.
+  Scene switches (gameplay <-> cutscene, loading) are measured: the report lists the freezes
+  and what they were spent on (shader compiling, loading data, shared memory, the card).
+  Frame-rate target (F3 > Graphics, next launch): "Optimizer: Frame-Rate Target" 30 and
+  "Lowest Quality It May Use" Low or Office. After each launch it checks your gameplay frame
+  rate and picks the performance mode for the next one: lower quality when you were under the
+  target, back up when the card had plenty of room. It never goes below your limit.
   What it never does: change graphics settings, the frame-rate / vblank setting, async compute
   or present mode on its own (those are only recommended), override a value you set yourself
   in the environment, or keep a change it could not measure as a win.
-  It forgets / re-checks learned values by itself when the GPU driver, the game build or the
-  emulator build changes. "Forget what was learned" in F1 starts over.
+  It re-checks learned values by itself when the GPU driver or the emulator build changes, and
+  starts a new profile when the game build or the PC changes. "Forget what was learned" in F1 starts over.
   Every session writes user\adaptive\latest-report.txt: hardware, decisions, evidence, cost.
   Turn it off completely: enabled = 0 in user\adaptive\settings.ini (then the emulator behaves
   exactly like the plain 4 GB build).
@@ -93,10 +103,17 @@ SECOND SON GAME PATCHES (F3 > Graphics, apply at the next launch; game update 01
   The optimizer recommends Low when the game stays well under 30 fps because of the graphics
   card ("Use next launch" in F1). If anything looks or behaves wrong, turn the patch off in F3.
 
-UPDATING TO A NEW BUILD
-  Extract the new zip over the old folder and keep the "user" folder. It holds your saves, the
-  shader cache (without it every effect stutters once while it is rebuilt), your settings and
-  what the optimizer learned.
+UPDATING TO A NEW BUILD - ONE DATA FOLDER FOR EVERY BUILD
+  From this build on, saves, shader cache, settings, logs and what the optimizer learned live in
+  "SecondSonAdaptive-data\user", next to your build folders (for example
+  E:\Games\...\PhoenixDownloads\SecondSonAdaptive-data\user). Extract each new build in its own
+  folder or over an old one: every build next to that folder uses the same data.
+  The first start of this build creates it by COPYING the "user" folder of the build folder you
+  played most recently (newest save); the old folders are not changed or deleted. The log says
+  which one was copied ("Adaptive: data folder ...").
+  To keep one build separate, put an empty file named portable.txt next to its shadPS4.exe.
+  What the optimizer learned also survives emulator updates now: learned values are re-checked
+  once instead of being forgotten.
 
 TROUBLESHOOTING
   Run COLLECT_DIAGNOSTICS.cmd and look at / send diagnostics.zip.

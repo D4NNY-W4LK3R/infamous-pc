@@ -85,3 +85,17 @@ TEST(Settings, GamePatchOptions) {
     EXPECT_FALSE(back.particle_late_read);
     EXPECT_TRUE(back.warnings.empty());
 }
+
+TEST(Settings, FrameRateTargetOptions) {
+    const auto s = ParseSettings("fps_target = 30\nauto_perf_max = office\n");
+    EXPECT_EQ(s.fps_target, 30u);
+    EXPECT_EQ(s.auto_perf_max, 2u);
+    EXPECT_TRUE(s.warnings.empty());
+    EXPECT_EQ(ParseSettings("fps_target = 3\n").warnings.size(), 1u);
+    UserSettings r;
+    r.fps_target = 45;
+    r.auto_perf_max = 1;
+    const auto back = ParseSettings(SerializeSettings(r));
+    EXPECT_EQ(back.fps_target, 45u);
+    EXPECT_EQ(back.auto_perf_max, 1u);
+}

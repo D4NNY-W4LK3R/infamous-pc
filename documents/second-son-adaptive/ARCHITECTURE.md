@@ -102,3 +102,41 @@ Without the hook, the mouse drives the right stick. Active only for CUSA00223 / 
 
 One relaxed atomic load per frame when disabled; when enabled, one ~200-byte copy into the ring
 per frame on the flip thread, and the brain's tick (reported per session as ms per tick).
+
+## Architecture v1.1 — the smarter optimizer (build 22)
+
+Field data from the player's GTX 1650 runs showed the optimizer forgetting everything with each
+new build, tests cancelled by every cutscene, a bottleneck label ("VRAM pressure") that hid a
+saturated graphics card, and freezes at scene switches nobody measured. v1.1:
+
+1. **Learning survives updates.** Profiles are keyed by hardware + game (knowledge schema 3). A
+   new emulator build or GPU driver moves learned values to "re-check" (re-tested with a full A/B
+   before they are trusted); crashes and clear regressions stay blocked. Schema-2 files are
+   migrated: the per-build profiles of one PC + game are merged (newest is the base, crash blocks
+   of all are kept).
+2. **One data folder.** On Windows the user folder is `<parent>\SecondSonAdaptive-data\user`, next
+   to the build folders (`common/shared_user_dir.*`). Its first use copies the most recently used
+   build's `user` folder (newest save) — never moves or deletes. `portable.txt` / SS_PORTABLE_USER
+   keep a build separate.
+3. **Scenes.** Each second is classified: gameplay (input within 2 s before or after; classified
+   with a 3 s delay), cutscene / watching, menu / pause (the same draw and dispatch counts every
+   frame for 3+ seconds), loading / video (< 60 draws). Live A/B tests start only in gameplay and
+   count only seconds of their own scene; another scene pauses the test (knob back on the old
+   value meanwhile). Blocks are counted seconds (10 per block incl. 2 settle), not wall time.
+4. **Resumable tests.** A test cut short (quit, 30 min without enough gameplay) keeps its seconds in
+   the knowledge base and the next session continues it.
+5. **Start-up tests in Automatic mode, judged on the same scene.** Still pictures carry a
+   signature (their draw / dispatch counts). Baseline launches record pause / menu seconds with
+   signatures; a test launch compares only seconds whose signature also has ≥ 5 baseline seconds,
+   each normalized by that scene's baseline median. Too few matches → abandoned, and the next
+   launch records more pause screens. Calibration mode keeps the title-screen method.
+6. **Scene switches** are recorded (worst frame and stall sums of the switch second and the 3
+   after) and reported with the share of shader compiling, loading data, shared-memory faults /
+   read-backs and graphics-card time. (Cached pipelines are already compiled at start by the
+   base's pipeline-cache warm-up; first-time shaders of new scenes cannot be.)
+7. **Diagnosis** uses the host GPU busy time: ≥ 85 % of the frame → "host GPU" bottleneck,
+   whatever else stalls.
+8. **Frame-rate target** (fps_target, auto_perf_max): after each launch the controller looks at
+   the gameplay frame rate (≥ 120 s needed) and sets the next launch's Second Son performance
+   mode one step lower (under target by > 8 %) or one step higher (on target with the card busy
+   < 65 % of the frame), always between the player's own choice and their limit.

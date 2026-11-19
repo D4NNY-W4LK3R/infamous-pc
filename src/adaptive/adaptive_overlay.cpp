@@ -102,13 +102,27 @@ public:
         }
         ImGui::Text("Limit: %s (%.0f%%)%s", std::string(ToString(s.bottleneck)).c_str(),
                     s.bottleneck_confidence * 100.0, s.in_gameplay ? "" : " - not in gameplay");
+        ImGui::Text("Scene: %s%s", std::string(ToString(s.scene)).c_str(),
+                    s.gpu_busy_ms_p50 > 0.0
+                        ? (" | graphics card busy " + std::to_string(static_cast<int>(
+                                                          s.gpu_busy_ms_p50 + 0.5)) +
+                           " ms a frame")
+                              .c_str()
+                        : "");
+        if (st.scene_switches > 0) {
+            ImGui::Text("Scene switches: %zu, worst freeze %.0f ms", st.scene_switches,
+                        st.worst_switch_ms);
+        }
+        if (!st.fps_target.empty()) {
+            ImGui::TextWrapped("Target: %s", st.fps_target.c_str());
+        }
         if (st.evaluation) {
             const auto& e = *st.evaluation;
             ImGui::Text("Measuring %s %lld -> %lld: block %u/%u, %zu + %zu seconds", e.knob.c_str(),
                         static_cast<long long>(e.old_value), static_cast<long long>(e.new_value),
                         e.block + 1, e.blocks, e.seconds_a, e.seconds_b);
         }
-        ImGui::Text("Calibration: %s", st.calibration.c_str());
+        ImGui::Text("Start-up test: %s", st.calibration.c_str());
 
         if (!st.recommendations.empty()) {
             ImGui::SeparatorText("Recommendations");

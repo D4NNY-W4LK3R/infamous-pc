@@ -812,6 +812,8 @@ set(COMMON src/common/logging/classes.cpp
            src/common/func_traits.h
            src/common/native_clock.cpp
            src/common/native_clock.h
+           src/common/shared_user_dir.cpp
+           src/common/shared_user_dir.h
            src/common/path_util.cpp
            src/common/perf_profiler.cpp
            src/common/perf_profiler.h

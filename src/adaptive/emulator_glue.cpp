@@ -21,6 +21,7 @@
 #include "common/path_util.h"
 #include "common/scm_rev.h"
 #include "common/thread.h"
+#include "common/shared_user_dir.h"
 #include "core/emulator_settings.h"
 #include "core/second_son_patches.h"
 #include "imgui/notice_layer.h"
@@ -41,6 +42,7 @@ std::unique_ptr<CentralBrain> g_brain;
 std::filesystem::path g_dir;
 UserSettings g_settings;
 std::atomic<bool> g_crashed{false};
+std::int32_t g_launch_perf_mode = -1; ///< chosen by the frame-rate target for this launch
 bool g_late_read_turned_off = false;
 std::mutex g_vram_mutex;
 std::function<std::uint64_t()> g_vram_used;
@@ -244,6 +246,9 @@ void Startup(const std::string& game_serial, const std::string& app_version,
     cfg.data_dir = g_dir;
     cfg.tick_ms = g_settings.tick_ms;
     cfg.calibrate_on_battery = g_settings.calibrate_on_battery;
+    cfg.fps_target = g_settings.fps_target;
+    cfg.perf_mode_floor = g_settings.perf_mode;
+    cfg.perf_mode_max = std::max(g_settings.auto_perf_max, g_settings.perf_mode);
     cfg.on_thread_start = [] {
         Common::SetCurrentThreadName("shadPS4:AdaptiveBrain");
         Common::SetCurrentThreadPriority(Common::ThreadPriority::Low);
@@ -290,6 +295,10 @@ void Startup(const std::string& game_serial, const std::string& app_version,
     });
 
     const StartupResult res = g_brain->Startup(g_hardware, sw, EnvGet, EnvSet);
+    g_launch_perf_mode = res.perf_mode;
+    if (!Common::FS::SharedUserDirNote().empty()) {
+        LOG_INFO(Render, "Adaptive: {}", Common::FS::SharedUserDirNote());
+    }
     LOG_INFO(Render, "Adaptive optimizer: mode {}, knowledge {}, profile {}", ToString(cfg.mode),
              ToString(res.load_status), MakeFingerprint(g_hardware, sw).ProfileKey());
     LOG_INFO(Render, "Adaptive hardware: {} | {} threads | {} GB RAM | GPU {} (driver {}){}",
@@ -425,6 +434,25 @@ void SaveChanged(const std::function<void(UserSettings&)>& change) {
 GamePatchSettings GamePatches() {
     const UserSettings s = CurrentSettings();
     return GamePatchSettings{s.particle_late_read, s.particle_light_one_submit, s.perf_mode};
+}
+
+std::uint32_t EffectivePerfMode() {
+    return g_launch_perf_mode >= 0 ? static_cast<std::uint32_t>(g_launch_perf_mode)
+                                   : CurrentSettings().perf_mode;
+}
+
+FpsTarget GetFpsTarget() {
+    const UserSettings s = CurrentSettings();
+    return FpsTarget{s.fps_target, s.auto_perf_max};
+}
+
+void SetFpsTarget(const FpsTarget& t) {
+    SaveChanged([&t](UserSettings& s) {
+        s.fps_target = t.fps == 0 ? 0 : std::clamp<std::uint32_t>(t.fps, 15, 240);
+        s.auto_perf_max = std::min<std::uint32_t>(t.lowest_quality, 2);
+    });
+    LOG_INFO(Render, "Frame-rate target for the next launch: {} fps, lowest quality {}", t.fps,
+             t.lowest_quality == 1 ? "low" : t.lowest_quality == 2 ? "office" : "off");
 }
 
 void SetGamePatches(const GamePatchSettings& patches) {

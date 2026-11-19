@@ -15,6 +15,9 @@
 //   particle_late_read = 1 Second Son reads particle results a frame later instead of waiting
 //                          for the GPU mid-frame (next launch; game update 01.07 only)
 //   particle_light_one_submit = 0  experimental, needs particle_late_read (next launch)
+//   fps_target = 0         the optimizer lowers the game's quality level (per launch) to reach
+//                          this frame rate; 0 = off
+//   auto_perf_max = off    the lowest quality it may use: off (none) | low | office
 //
 // Environment variables win over the file (SS_ADAPTIVE_MODE, SS_ADAPTIVE=0). The overlay writes
 // the file back when the user changes the mode, so the choice is remembered.
@@ -43,6 +46,8 @@ struct UserSettings {
     std::uint32_t perf_mode = 0;   ///< Second Son quality preset: 0 off, 1 low, 2 office
     bool particle_late_read = true;
     bool particle_light_one_submit = false;
+    std::uint32_t fps_target = 0;    ///< 0 = off
+    std::uint32_t auto_perf_max = 0; ///< 0 = the optimizer may not lower quality
     std::vector<std::string> warnings; ///< unknown keys, bad values (not fatal)
 };
 

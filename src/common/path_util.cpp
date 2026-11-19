@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <fstream>
+#include <optional>
 #include <unordered_map>
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/scope_exit.h"
+#include "common/shared_user_dir.h"
 #include "common/types.h"
 #include "core/file_sys/ifile.h"
 
@@ -85,9 +87,41 @@ static std::optional<std::filesystem::path> GetBundleParentDirectory() {
 }
 #endif
 
+#ifdef _WIN32
+/// Second Son Adaptive: one data folder for every build (common/shared_user_dir.h).
+static std::optional<std::filesystem::path> SecondSonSharedUserDir() {
+    wchar_t buffer[MAX_PATH] = {};
+    const DWORD n = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) {
+        return std::nullopt;
+    }
+    const char* portable = getenv("SS_PORTABLE_USER");
+    const bool portable_requested = portable != nullptr && portable[0] == '1';
+    try {
+        const auto r = ChooseSharedUserDir(std::filesystem::path(buffer).parent_path(),
+                                           portable_requested);
+        if (!r) {
+            SetSharedUserDirNote("data folder: the \"user\" folder next to the emulator "
+                                 "(portable)");
+            return std::nullopt;
+        }
+        SetSharedUserDirNote(r->note);
+        return r->user_dir;
+    } catch (...) {
+        SetSharedUserDirNote("data folder: shared folder unavailable, using the portable one");
+        return std::nullopt;
+    }
+}
+#endif
+
 static auto UserPaths = [] {
     // Try the portable user directory first.
     auto user_dir = std::filesystem::current_path() / PORTABLE_DIR;
+#ifdef _WIN32
+    if (const auto shared = SecondSonSharedUserDir()) {
+        user_dir = *shared;
+    }
+#endif
     if (!std::filesystem::exists(user_dir)) {
         // If it doesn't exist, use the standard path for the platform instead.
         // NOTE: On Windows we currently just create the portable directory instead.

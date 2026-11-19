@@ -124,6 +124,13 @@ private:
     int perfModeSetting = 0;
     bool particleLateReadSetting = true;
     bool particleLightsSetting = false;
+    // Frame-rate target: the optimizer picks the performance mode per launch.
+    const std::vector<std::string> fpsTargetOptions = {"Off", "30", "40", "45", "60"};
+    const std::vector<u32> fpsTargetValues = {0, 30, 40, 45, 60};
+    int fpsTargetSetting = 0;
+    const std::vector<std::string> lowestQualityOptions = {"Keep my Performance Mode", "Low",
+                                                           "Office"};
+    int lowestQualitySetting = 0;
     const std::vector<std::string> hideCursorOptions = {"Never", "Idle", "Always"};
     const std::vector<std::string> trophySideOptions = {"left", "right", "top", "bottom"};
     const std::vector<std::string> readbacksModeOptions = {"Disabled", "Relaxed", "Precise"};

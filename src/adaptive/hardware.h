@@ -56,8 +56,8 @@ struct Fingerprint {
     std::string game;     ///< serial + version + eboot signature
     std::string emulator; ///< emulator build
     bool operator==(const Fingerprint&) const = default;
-    /// The key used to file results: the hardware, game and emulator parts. A driver change
-    /// does not file into a new profile; it marks the existing one for revalidation.
+    /// The key used to file results: the hardware and game parts. A driver or emulator change
+    /// does not file into a new profile; it marks the existing one's values for re-checking.
     std::string ProfileKey() const;
 };
 

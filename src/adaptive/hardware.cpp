@@ -70,7 +70,7 @@ Fingerprint MakeFingerprint(const HardwareInfo& hw, const SoftwareInfo& sw) {
 }
 
 std::string Fingerprint::ProfileKey() const {
-    return Hex64(Fnv1a64(hardware + '#' + game + '#' + emulator));
+    return Hex64(Fnv1a64(hardware + '#' + game));
 }
 
 std::vector<std::string> Differences(const Fingerprint& a, const Fingerprint& b) {

@@ -49,9 +49,18 @@ void TelemetryWindow::CloseSecond() {
     s.start_ns = current_second_start;
     s.frames = static_cast<std::uint32_t>(current_second.size());
     std::vector<double> ms;
+    std::vector<double> draws, dispatches, busy;
     ms.reserve(current_second.size());
+    bool same = true;
     for (const auto& f : current_second) {
         ms.push_back(f.frame_ms);
+        draws.push_back(f.draws);
+        dispatches.push_back(f.dispatches);
+        if (f.gpu_busy_ms > 0.0f) {
+            busy.push_back(f.gpu_busy_ms);
+        }
+        same = same && f.draws == current_second.front().draws &&
+               f.dispatches == current_second.front().dispatches;
         s.max_ms = std::max(s.max_ms, static_cast<double>(f.frame_ms));
         for (std::size_t i = 0; i < NumStallKinds; ++i) {
             s.stall_ms[i] += f.stall_ms[i];
@@ -59,6 +68,17 @@ void TelemetryWindow::CloseSecond() {
     }
     s.median_ms = Stats::Percentile(ms, 0.5);
     s.p99_ms = Stats::Percentile(ms, 0.99);
+    s.draws_median = static_cast<std::uint32_t>(Stats::Percentile(draws, 0.5));
+    s.dispatches_median = static_cast<std::uint32_t>(Stats::Percentile(dispatches, 0.5));
+    s.gpu_busy_median_ms = busy.empty() ? 0.0 : Stats::Percentile(busy, 0.5);
+    // A still picture needs a few frames and something drawn; its signature is its draw and
+    // dispatch count, which a paused scene or a menu keeps exactly from frame to frame.
+    s.same_every_frame = same && current_second.size() >= 5 && s.draws_median > 0;
+    if (s.same_every_frame) {
+        const std::uint64_t key = (static_cast<std::uint64_t>(s.draws_median) << 32) |
+                                  s.dispatches_median;
+        s.signature = key | 1ull << 63; // never 0
+    }
     for (const double v : ms) {
         if (v >= HitchFloorMs && v >= 2.0 * s.median_ms) {
             ++s.hitches;
@@ -139,6 +159,16 @@ Snapshot TelemetryWindow::Build(std::uint64_t now_ns) const {
         }
     }
     s.in_gameplay = !gap && s.window_seconds >= window_seconds * 0.6 && s.fps >= 5.0;
+    std::vector<double> busy;
+    for (const auto& f : frames) {
+        if (f.gpu_busy_ms > 0.0f) {
+            busy.push_back(f.gpu_busy_ms);
+        }
+    }
+    // Only meaningful when most frames were timed.
+    if (busy.size() * 2 >= frames.size()) {
+        s.gpu_busy_ms_p50 = Stats::Percentile(busy, 0.5);
+    }
     return s;
 }
 

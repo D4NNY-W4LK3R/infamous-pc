@@ -259,27 +259,67 @@ StartupResult CentralBrain::Startup(const HardwareInfo& hw, const SoftwareInfo& 
              p.revalidation_reason + "); Calibration mode re-tests them");
     }
 
-    // Calibration: one experiment per launch, judged against this profile's baseline.
-    if (mode == Mode::Calibration) {
+    // Start-up tests: one experiment per launch, judged against this profile's baseline. In
+    // Calibration mode on idle seconds (the player leaves the title screen running); in
+    // Automatic mode on still pictures (pause, menus) that also appear in the baseline.
+    const bool auto_tests = mode == Mode::Automatic && config.automatic_startup_tests;
+    const std::size_t baseline_have =
+        auto_tests ? static_cast<std::size_t>(std::count_if(
+                         p.baseline_signatures.begin(), p.baseline_signatures.end(),
+                         [](std::uint64_t sig) { return sig != 0; }))
+                   : p.baseline_seconds_ms.size();
+    if (auto_tests && baseline_have < p.baseline_seconds_ms.size()) {
+        // Idle seconds from Calibration mode cannot be matched to a scene: start over.
+        p.baseline_seconds_ms.clear();
+        p.baseline_seconds_p99_ms.clear();
+        p.baseline_signatures.clear();
+    }
+    if (mode == Mode::Calibration || auto_tests) {
         if (hw.on_battery && !config.calibrate_on_battery) {
-            Note("calibration skipped: on battery power, measurements would not be comparable");
-        } else if (p.baseline_seconds_ms.size() < config.baseline_min_seconds) {
+            Note("start-up tests skipped: on battery power, measurements would not be "
+                 "comparable");
+        } else if (const auto last = std::find_if(
+                       p.history.rbegin(), p.history.rend(),
+                       [](const ExperimentRecord& e) {
+                           return e.method == "launch-ab-still" || e.method == "launch-baseline";
+                       });
+                   auto_tests && last != p.history.rend() && last->method == "launch-ab-still" &&
+                   last->outcome == Outcome::Abandoned) {
+            // The last test found too few pause screens it could compare: record the pause
+            // screens of this launch instead, so the next test has more to match.
             baseline_session = true;
-            Note("calibration: this launch measures the baseline (" +
-                 std::to_string(p.baseline_seconds_ms.size()) + "/" +
-                 std::to_string(config.baseline_min_seconds) + " idle seconds collected so far)");
+            Note("start-up tests: the last test found too few known pause screens; this launch "
+                 "records more of them");
+        } else if (baseline_have < config.baseline_min_seconds) {
+            baseline_session = true;
+            Note(auto_tests
+                     ? "start-up tests: this launch records how pause and menu screens run (" +
+                           std::to_string(baseline_have) + "/" +
+                           std::to_string(config.baseline_min_seconds) +
+                           " seconds so far); tests start once enough are known"
+                     : "calibration: this launch measures the baseline (" +
+                           std::to_string(baseline_have) + "/" +
+                           std::to_string(config.baseline_min_seconds) +
+                           " idle seconds collected so far)");
         } else {
             const auto best = [&](const KnobState& st) {
                 const auto it = chosen.find(st.spec.id);
                 return it == chosen.end() ? st.spec.default_value : it->second;
             };
             const auto tried = [&](const std::string& knob, std::int64_t base, std::int64_t v) {
-                return std::any_of(p.history.begin(), p.history.end(), [&](const auto& e) {
-                    return e.knob == knob && e.value == v && e.baseline_value == base &&
-                           e.method == "launch-ab" &&
-                           (e.outcome == Outcome::Neutral || e.outcome == Outcome::Regressed ||
-                            e.outcome == Outcome::Improved);
-                });
+                std::uint32_t abandoned = 0;
+                const bool judged =
+                    std::any_of(p.history.begin(), p.history.end(), [&](const auto& e) {
+                        const bool same = e.knob == knob && e.value == v &&
+                                          e.baseline_value == base &&
+                                          e.method.rfind("launch-ab", 0) == 0;
+                        abandoned += same && e.outcome == Outcome::Abandoned ? 1 : 0;
+                        return same &&
+                               (e.outcome == Outcome::Neutral || e.outcome == Outcome::Regressed ||
+                                e.outcome == Outcome::Improved);
+                    });
+                // Three launches without enough comparable seconds: give the next one a turn.
+                return judged || abandoned >= 3;
             };
             const auto blocked = [&](const std::string& knob, std::int64_t v) {
                 const auto it = p.rejected.find(knob);
@@ -326,17 +366,35 @@ StartupResult CentralBrain::Startup(const HardwareInfo& hw, const SoftwareInfo& 
             }
             if (experiment) {
                 chosen[experiment->knob] = experiment->value;
-                Note("calibration: this launch tests " + experiment->knob + "=" +
-                     std::to_string(experiment->value) + " against " +
-                     std::to_string(experiment->baseline_value) +
-                     " (leave the game idle on a steady scene, e.g. the title screen, for 2 "
-                     "minutes after it loads)");
+                Note(auto_tests
+                         ? "start-up test: this launch tests " + experiment->knob + "=" +
+                               std::to_string(experiment->value) + " against " +
+                               std::to_string(experiment->baseline_value) +
+                               ", judged on pause and menu screens seen in earlier launches"
+                         : "calibration: this launch tests " + experiment->knob + "=" +
+                               std::to_string(experiment->value) + " against " +
+                               std::to_string(experiment->baseline_value) +
+                               " (leave the game idle on a steady scene, e.g. the title screen, "
+                               "for 2 minutes after it loads)");
             } else {
                 baseline_session = true;
-                Note("calibration: every candidate has been measured on this PC; this launch "
+                Note("start-up tests: every candidate has been measured on this PC; this launch "
                      "refreshes the baseline");
             }
         }
+    }
+
+    // Frame-rate target: the game's quality level for this launch, between the player's own
+    // choice (floor) and the lowest quality they allow (max).
+    if (config.fps_target > 0 && config.perf_mode_max > config.perf_mode_floor) {
+        const auto lo = static_cast<std::int32_t>(config.perf_mode_floor);
+        const auto hi = static_cast<std::int32_t>(config.perf_mode_max);
+        launch_perf_mode = p.auto_perf_mode >= 0 ? std::clamp(p.auto_perf_mode, lo, hi) : lo;
+        r.perf_mode = launch_perf_mode;
+        static constexpr const char* Names[] = {"off", "low", "office"};
+        Note("frame-rate target " + std::to_string(config.fps_target) +
+             " fps: this launch uses performance mode " + Names[launch_perf_mode] +
+             " (allowed: " + Names[lo] + " to " + Names[hi] + ")");
     }
 
     r.launch_values = knobs.ApplyLaunchValues(chosen, env_get, env_set);
@@ -383,6 +441,13 @@ Bottleneck CentralBrain::Diagnose(const Snapshot& s, double vram_pressure, bool 
         confidence = std::min(1.0, shader / frame);
         return Bottleneck::Warmup;
     }
+    // The graphics card itself: when it is busy for most of every frame, nothing on the CPU side
+    // can make frames faster, whatever else stalls (field: GTX 1650 busy 27-33 ms of ~31 ms
+    // frames, which the stall shares alone labelled "VRAM pressure").
+    if (s.gpu_busy_ms_p50 > 0.0 && s.gpu_busy_ms_p50 >= 0.85 * frame) {
+        confidence = std::min(1.0, s.gpu_busy_ms_p50 / frame);
+        return Bottleneck::HostGpuBound;
+    }
     struct Candidate {
         Bottleneck b;
         double share;
@@ -416,6 +481,126 @@ Bottleneck CentralBrain::Diagnose(const Snapshot& s, double vram_pressure, bool 
     return Bottleneck::Unknown;
 }
 
+Scene CentralBrain::ClassifySecond(const SecondSummary& s, bool input_recent,
+                                   std::uint32_t still_run) {
+    if (s.draws_median == 0 && s.dispatches_median == 0) {
+        return Scene::Unknown; // the emulator reported no draw counts
+    }
+    if (s.draws_median < 60) {
+        return Scene::Loading;
+    }
+    if (still_run >= 3) {
+        return Scene::Menu;
+    }
+    return input_recent ? Scene::Gameplay : Scene::Cutscene;
+}
+
+void CentralBrain::ClassifySeconds() {
+    // A second is gameplay when the player gave input within two seconds of it, before or after.
+    // Seconds are therefore classified with a three-second delay; nothing that compares seconds
+    // looks at one before it is classified, so the first seconds of a cutscene are never taken
+    // for gameplay just because the last key press was a moment ago.
+    constexpr std::uint64_t Margin = 2'000'000'000ull;
+    constexpr std::uint64_t Delay = 3'000'000'000ull;
+    const std::uint64_t input = last_input_ns.load(std::memory_order_relaxed);
+    if (input != 0 && (input_times.empty() || input_times.back() != input)) {
+        input_times.push_back(input);
+        while (input_times.size() > 4096) {
+            input_times.pop_front();
+        }
+    }
+    const std::uint64_t now = clock();
+    for (const auto& s : window.SecondsSince(scene_last_second + 1)) {
+        if (s.start_ns + 1'000'000'000ull + Delay > now) {
+            break;
+        }
+        scene_last_second = s.start_ns;
+        if (s.signature != 0 && s.signature == still_signature) {
+            ++still_run;
+        } else {
+            still_run = s.signature != 0 ? 1 : 0;
+            still_signature = s.signature;
+        }
+        const std::uint64_t lo = s.start_ns > Margin ? s.start_ns - Margin : 0;
+        const std::uint64_t hi = s.start_ns + 1'000'000'000ull + Margin;
+        const auto it = std::lower_bound(input_times.begin(), input_times.end(), lo);
+        const bool input_recent = it != input_times.end() && *it <= hi;
+        const Scene scene = ClassifySecond(s, input_recent, still_run);
+        scene_seconds.push_back({s.start_ns, scene, scene == Scene::Menu ? s.signature : 0});
+        while (scene_seconds.size() > 1800) {
+            scene_seconds.pop_front();
+        }
+        auto& st = scene_stats[static_cast<std::size_t>(scene)];
+        ++st.seconds;
+        if (s.frames >= 10 && st.medians.size() < 7200) {
+            st.medians.push_back(s.median_ms);
+        }
+        if (scene == Scene::Gameplay && s.gpu_busy_median_ms > 0.0 &&
+            gameplay_gpu_busy.size() < 7200) {
+            gameplay_gpu_busy.push_back(s.gpu_busy_median_ms);
+        }
+        // Scene switches: the second of the switch and the three after it.
+        for (auto& sw : switches) {
+            if (sw.seconds_left == 0) {
+                continue;
+            }
+            --sw.seconds_left;
+            sw.worst_ms = std::max(sw.worst_ms, s.max_ms);
+            for (std::size_t i = 0; i < NumStallKinds; ++i) {
+                sw.stall_ms[i] += s.stall_ms[i];
+            }
+            sw.frames_over_100ms += s.max_ms >= 100.0 ? 1 : 0;
+        }
+        if (scene != Scene::Unknown && last_scene != Scene::Unknown && scene != last_scene) {
+            SceneSwitch sw;
+            sw.t_ns = s.start_ns;
+            sw.from = last_scene;
+            sw.to = scene;
+            sw.worst_ms = s.max_ms;
+            sw.stall_ms = s.stall_ms;
+            sw.frames_over_100ms = s.max_ms >= 100.0 ? 1 : 0;
+            sw.seconds_left = 3;
+            switches.push_back(sw);
+            while (switches.size() > 200) {
+                switches.pop_front();
+            }
+        }
+        if (scene != Scene::Unknown) {
+            last_scene = scene;
+        }
+    }
+}
+
+Scene CentralBrain::SceneOf(std::uint64_t second_start) const {
+    for (auto it = scene_seconds.rbegin(); it != scene_seconds.rend(); ++it) {
+        if (it->start_ns == second_start) {
+            return it->scene;
+        }
+        if (it->start_ns < second_start) {
+            break;
+        }
+    }
+    return Scene::Unknown;
+}
+
+bool CentralBrain::StillPictureSecond(std::uint64_t second_start, std::uint64_t& signature) const {
+    for (auto it = scene_seconds.rbegin(); it != scene_seconds.rend(); ++it) {
+        if (it->start_ns == second_start) {
+            signature = it->signature;
+            return it->scene == Scene::Menu;
+        }
+        if (it->start_ns < second_start) {
+            break;
+        }
+    }
+    signature = 0;
+    return false;
+}
+
+std::vector<SceneSwitch> CentralBrain::SceneSwitches() const {
+    return {switches.begin(), switches.end()};
+}
+
 void CentralBrain::ProcessCommands() {
     std::vector<std::function<void()>> pending;
     {
@@ -440,7 +625,9 @@ void CentralBrain::Tick() {
     if (sampler) {
         window.SetResources(sampler());
     }
+    ClassifySeconds();
     Snapshot s = window.Build(now);
+    s.scene = last_scene;
     memory->Think(s, {});
     const bool warmup =
         first_frame_ns == 0 || now < first_frame_ns + ToNs(config.warmup_min_seconds);
@@ -460,9 +647,14 @@ void CentralBrain::Tick() {
         if (evaluation) {
             AdvanceEvaluation(now);
         }
+        const bool playing = s.scene == Scene::Gameplay || s.scene == Scene::Unknown;
         if ((mode == Mode::Automatic || mode == Mode::Calibration) && !learned_live_applied &&
-            !evaluation && s.in_gameplay && !warmup && !gate.KillSwitchTripped()) {
+            !evaluation && s.in_gameplay && playing && !warmup && !gate.KillSwitchTripped()) {
             ApplyLearnedLiveValues(now);
+        }
+        if (mode == Mode::Automatic && learned_live_applied && !evaluation && s.in_gameplay &&
+            playing && !warmup && !gate.KillSwitchTripped()) {
+            ResumePartialEvaluation(now);
         }
         ConsiderProposals(now);
     }
@@ -492,6 +684,17 @@ void CentralBrain::ApplyLearnedLiveValues(std::uint64_t now) {
             return;
         }
     }
+    // Values learned before an emulator or driver update: a full A/B test, not just a watch.
+    for (const auto& [knob, v] : p->revalidate) {
+        const KnobState* st = knobs.Find(knob);
+        if (st && st->spec.scope == Scope::Live && st->value != v && !st->user_pinned &&
+            !session_tried.contains({knob, v})) {
+            StartEvaluation(knob, v, "Knowledge Base",
+                            "re-check of a value learned before: " + p->revalidation_reason, false,
+                            now);
+            return;
+        }
+    }
     learned_live_applied = true;
 }
 
@@ -514,7 +717,33 @@ bool CentralBrain::StartEvaluation(const std::string& knob, std::int64_t value,
     ev.ref_p99 = last_snapshot.frame_ms_p99;
     ev.confirm_only = confirm_only;
     ev.reason = reason;
-    if (!knobs.Set(knob, value, now)) {
+    ev.scene = last_scene;
+    ev.settle_left = static_cast<std::uint32_t>(config.settle_seconds);
+    // Continue a test an earlier session could not finish (same knob, same two values).
+    bool resumed = false;
+    if (Profile* p = CurrentProfile(); p && p->partial && !confirm_only) {
+        const PartialEvaluation& pe = *p->partial;
+        if (pe.knob == knob && pe.old_value == ev.old_value && pe.new_value == value) {
+            ev.a_median = pe.a_median;
+            ev.b_median = pe.b_median;
+            ev.a_p99 = pe.a_p99;
+            ev.b_p99 = pe.b_p99;
+            ev.a_hitches = pe.a_hitches;
+            ev.b_hitches = pe.b_hitches;
+            ev.resumed_sessions = pe.sessions;
+            const std::uint32_t per_block = std::max<std::uint32_t>(
+                1, static_cast<std::uint32_t>(config.eval_block_seconds - config.settle_seconds));
+            const auto blocks_b = static_cast<std::uint32_t>(ev.b_median.size()) / per_block;
+            const auto blocks_a = static_cast<std::uint32_t>(ev.a_median.size()) / per_block;
+            // Blocks alternate B, A, B, A...: resume at the first block not yet complete.
+            ev.block = std::min(blocks_b * 2, blocks_a * 2 + 1);
+            ev.block = std::min(ev.block, config.eval_blocks - 1);
+            resumed = true;
+        }
+        p->partial.reset();
+    }
+    const std::int64_t first_value = ev.block % 2 == 0 ? value : ev.old_value;
+    if (!knobs.Set(knob, first_value, now)) {
         Log(proposer, knob, ev.old_value, value,
             Decision{Verdict::Rejected, "actuator", "the emulator did not take the value"}, reason);
         return false;
@@ -522,7 +751,12 @@ bool CentralBrain::StartEvaluation(const std::string& knob, std::int64_t value,
     gate.NoteApplied(knob, now);
     Log(proposer, knob, ev.old_value, value,
         Decision{Verdict::Accepted, confirm_only ? "learned-value" : "accepted",
-                 confirm_only ? "reapplied; watched for 60 s" : "A/B measurement started"},
+                 confirm_only ? "reapplied; watched for 60 s of gameplay"
+                 : resumed    ? F("A/B measurement continued (%.0f + %.0f seconds from earlier "
+                                  "sessions)",
+                                  static_cast<double>(ev.a_median.size()),
+                                  static_cast<double>(ev.b_median.size()))
+                              : std::string("A/B measurement started")},
         reason);
     evaluation = std::move(ev);
     return true;
@@ -531,13 +765,41 @@ bool CentralBrain::StartEvaluation(const std::string& knob, std::int64_t value,
 void CentralBrain::AdvanceEvaluation(std::uint64_t now) {
     Evaluation& ev = *evaluation;
     if (now - ev.start_ns > ToNs(config.eval_timeout_seconds)) {
-        FinishEvaluation(Outcome::Abandoned, "no steady gameplay to measure within 10 minutes", now);
+        if (ev.confirm_only) {
+            FinishEvaluation(Outcome::Abandoned, "no gameplay to watch for 30 minutes", now);
+        } else {
+            KeepPartialEvaluation("too little gameplay in 30 minutes", now);
+        }
         return;
     }
-    const std::uint64_t settle = ToNs(config.settle_seconds);
+    const std::uint32_t per_block = std::max<std::uint32_t>(
+        1, static_cast<std::uint32_t>(config.eval_block_seconds - config.settle_seconds));
     for (const auto& s : window.SecondsSince(ev.last_second_seen + 1)) {
+        if (s.start_ns > scene_last_second) {
+            break; // not classified yet
+        }
         ev.last_second_seen = s.start_ns;
-        if (s.frames < 10 || s.start_ns < ev.block_start_ns + settle) {
+        if (s.frames < 10) {
+            continue;
+        }
+        // Compare like with like: a cutscene, menu or loading screen pauses the test, with the
+        // knob back on its old value meanwhile (so other measurements see the usual setup).
+        if (SceneOf(s.start_ns) != ev.scene) {
+            ++ev.other_scene_seconds;
+            if (!ev.paused && !ev.confirm_only) {
+                ev.paused = true;
+                knobs.Set(ev.knob, ev.old_value, now);
+            }
+            continue;
+        }
+        if (ev.paused) {
+            ev.paused = false;
+            knobs.Set(ev.knob, ev.block % 2 == 0 ? ev.new_value : ev.old_value, now);
+            ev.settle_left = static_cast<std::uint32_t>(config.settle_seconds);
+            continue;
+        }
+        if (ev.settle_left > 0) {
+            --ev.settle_left;
             continue;
         }
         // Seconds spent compiling shaders measure the shader cache, not the setting: they count
@@ -581,14 +843,18 @@ void CentralBrain::AdvanceEvaluation(std::uint64_t now) {
             ev.a_p99.push_back(s.p99_ms);
             ev.a_hitches += s.hitches > 0 ? 1 : 0;
         }
-    }
-    if (ev.confirm_only) {
-        if (ev.b_median.size() >= 60) {
-            FinishEvaluation(Outcome::Improved, "learned value held for 60 s of gameplay", now);
+        if (ev.confirm_only) {
+            if (ev.b_median.size() >= 60) {
+                FinishEvaluation(Outcome::Improved, "learned value held for 60 s of gameplay",
+                                 now);
+                return;
+            }
+            continue;
         }
-        return;
-    }
-    if (now - ev.block_start_ns >= ToNs(config.eval_block_seconds)) {
+        if (++ev.block_counted < per_block) {
+            continue;
+        }
+        ev.block_counted = 0;
         ++ev.block;
         if (ev.block >= config.eval_blocks) {
             const double a_rate = ev.a_median.empty() ? 0.0
@@ -600,19 +866,81 @@ void CentralBrain::AdvanceEvaluation(std::uint64_t now) {
             double p = 1.0;
             const Outcome o = Judge(ev.a_median, ev.b_median, ev.a_p99, ev.b_p99, a_rate, b_rate, p);
             const auto cmp = Stats::Compare(ev.a_median, ev.b_median);
+            std::string extra;
+            if (ev.compile_seconds_skipped) {
+                extra += ", " + std::to_string(ev.compile_seconds_skipped) +
+                         " shader-compile seconds left out";
+            }
+            if (ev.other_scene_seconds) {
+                extra += ", " + std::to_string(ev.other_scene_seconds) +
+                         " seconds of other scenes left out";
+            }
+            if (ev.resumed_sessions) {
+                extra += ", measured over " + std::to_string(ev.resumed_sessions + 1) + " sessions";
+            }
             FinishEvaluation(o,
                              F("median %.2f -> %.2f ms (%+.1f%%), p = %.3f", cmp.median_a,
                                cmp.median_b, cmp.relative_change * 100.0, p) +
-                                 (ev.compile_seconds_skipped
-                                      ? ", " + std::to_string(ev.compile_seconds_skipped) +
-                                            " shader-compile seconds left out"
-                                      : std::string{}),
+                                 extra,
                              now);
             return;
         }
         knobs.Set(ev.knob, ev.block % 2 == 0 ? ev.new_value : ev.old_value, now);
         ev.block_start_ns = now;
+        ev.settle_left = static_cast<std::uint32_t>(config.settle_seconds);
     }
+}
+
+void CentralBrain::KeepPartialEvaluation(const std::string& why, std::uint64_t now) {
+    if (!evaluation) {
+        return;
+    }
+    Evaluation ev = std::move(*evaluation);
+    evaluation.reset();
+    knobs.Set(ev.knob, ev.old_value, now);
+    Profile* p = CurrentProfile();
+    if (p && (ev.a_median.size() + ev.b_median.size()) > 0) {
+        PartialEvaluation pe;
+        pe.knob = ev.knob;
+        pe.old_value = ev.old_value;
+        pe.new_value = ev.new_value;
+        pe.a_median = ev.a_median;
+        pe.b_median = ev.b_median;
+        pe.a_p99 = ev.a_p99;
+        pe.b_p99 = ev.b_p99;
+        pe.a_hitches = ev.a_hitches;
+        pe.b_hitches = ev.b_hitches;
+        pe.started_unix = UnixNow();
+        pe.sessions = ev.resumed_sessions + 1;
+        p->partial = std::move(pe);
+    }
+    Log(ev.proposer, ev.knob, ev.new_value, ev.old_value,
+        Decision{Verdict::Deferred, "test-paused",
+                 why + F("; %.0f + %.0f seconds kept, the test continues in a later session",
+                         static_cast<double>(ev.a_median.size()),
+                         static_cast<double>(ev.b_median.size()))},
+        ev.reason);
+    SaveKnowledge();
+}
+
+void CentralBrain::ResumePartialEvaluation(std::uint64_t now) {
+    Profile* p = CurrentProfile();
+    if (!p || !p->partial) {
+        return;
+    }
+    const PartialEvaluation pe = *p->partial;
+    const KnobState* st = knobs.Find(pe.knob);
+    const auto blocked = p->rejected.find(pe.knob);
+    if (!st || st->spec.scope != Scope::Live || st->user_pinned || st->value != pe.old_value ||
+        (blocked != p->rejected.end() && blocked->second.contains(pe.new_value)) ||
+        memory->Veto()) {
+        if (!st || st->user_pinned || st->spec.scope != Scope::Live) {
+            p->partial.reset(); // cannot be continued here
+        }
+        return;
+    }
+    StartEvaluation(pe.knob, pe.new_value, "Knowledge Base",
+                    "continuing a test from an earlier session", false, now);
 }
 
 Outcome CentralBrain::Judge(const std::vector<double>& a_med, const std::vector<double>& b_med,
@@ -624,19 +952,21 @@ Outcome CentralBrain::Judge(const std::vector<double>& a_med, const std::vector<
     if (cmp.n_a < 6 || cmp.n_b < 6) {
         return Outcome::Abandoned;
     }
+    // Hitch rates are hitch-seconds per minute; one event is worth 60 / n per minute, so the
+    // tolerances are counted in events: regressing needs about three more hitch-seconds than the
+    // other side, a winner may have one more (a scene-streaming hitch is the game, not the knob).
+    const double one_event = 60.0 / static_cast<double>(std::max<std::size_t>(cmp.n_b, 1));
     const bool regressed =
         (cmp.p_value < config.significance && cmp.relative_change >= config.regress_threshold) ||
         (p99.p_value < config.significance && p99.relative_change > 2.0 * config.p99_tolerance) ||
-        // Rates are hitch-seconds per minute over ~50 s per side, so one event is ~1.2/min:
-        // regressing on hitches needs about three more hitch-seconds than the other side.
-        b_hitch_rate > a_hitch_rate * 2.0 + 3.0;
+        b_hitch_rate > a_hitch_rate * 2.0 + 3.0 * one_event;
     if (regressed) {
         return Outcome::Regressed;
     }
     const bool improved = cmp.p_value < config.significance &&
                           cmp.relative_change <= -config.improve_threshold &&
                           p99.relative_change <= config.p99_tolerance &&
-                          b_hitch_rate <= a_hitch_rate * 1.25 + 1.5;
+                          b_hitch_rate <= a_hitch_rate * 1.25 + one_event;
     return improved ? Outcome::Improved : Outcome::Neutral;
 }
 
@@ -665,6 +995,13 @@ void CentralBrain::FinishEvaluation(Outcome outcome, const std::string& why, std
         }
         if (outcome == Outcome::Regressed) {
             p->rejected[ev.knob][ev.new_value] = Outcome::Regressed;
+        }
+        // A re-check settles the value either way (abandoned ones are tried again later).
+        if (outcome != Outcome::Abandoned) {
+            const auto rv = p->revalidate.find(ev.knob);
+            if (rv != p->revalidate.end() && rv->second == ev.new_value) {
+                p->revalidate.erase(rv);
+            }
         }
         ExperimentRecord rec;
         rec.knob = ev.knob;
@@ -699,7 +1036,8 @@ void CentralBrain::ConsiderProposals(std::uint64_t now) {
     GateContext ctx;
     ctx.mode = mode;
     ctx.now_ns = now;
-    ctx.in_gameplay = s.in_gameplay;
+    // Tests start only while the player plays: cutscenes, menus and loading are other scenes.
+    ctx.in_gameplay = s.in_gameplay && (s.scene == Scene::Gameplay || s.scene == Scene::Unknown);
     ctx.warming_up = s.bottleneck == Bottleneck::Warmup || first_frame_ns == 0 ||
                      now < first_frame_ns + ToNs(config.warmup_min_seconds);
     // A calibration measurement in progress counts as an evaluation: no live change may
@@ -778,78 +1116,172 @@ void CentralBrain::ConsiderProposals(std::uint64_t now) {
     }
 }
 
-void CentralBrain::UpdateCalibration(std::uint64_t) {
+namespace {
+/// Start-up test seconds compared with baseline seconds of the same scene. Each second is divided
+/// by the median of the baseline seconds that showed the same still picture, so seconds of a
+/// light menu and a heavy paused city can be pooled. Signature 0 (an idle moving scene, only
+/// used in Calibration mode, where the player idles on the title screen) matches signature 0.
+struct MatchedSets {
+    std::vector<double> base, test, base99, test99;
+    std::vector<double> base_ms, test_ms; ///< unnormalized, for the record
+};
+MatchedSets MatchScenes(const std::vector<double>& base_ms, const std::vector<double>& base_p99,
+                        const std::vector<std::uint64_t>& base_sig,
+                        const std::vector<double>& test_ms, const std::vector<double>& test_p99,
+                        const std::vector<std::uint64_t>& test_sig) {
+    std::map<std::uint64_t, std::vector<std::size_t>> by_sig;
+    for (std::size_t i = 0; i < base_ms.size(); ++i) {
+        by_sig[i < base_sig.size() ? base_sig[i] : 0].push_back(i);
+    }
+    std::map<std::uint64_t, std::pair<double, double>> ref; // sig -> median, p99 median
+    for (const auto& [sig, idx] : by_sig) {
+        if (idx.size() < 5) {
+            continue; // too few baseline seconds of this scene to stand for it
+        }
+        std::vector<double> m, q;
+        for (const auto i : idx) {
+            m.push_back(base_ms[i]);
+            q.push_back(i < base_p99.size() ? base_p99[i] : base_ms[i]);
+        }
+        ref[sig] = {Stats::Percentile(m, 0.5), Stats::Percentile(q, 0.5)};
+    }
+    std::set<std::uint64_t> used;
+    MatchedSets out;
+    for (std::size_t i = 0; i < test_ms.size(); ++i) {
+        const std::uint64_t sig = i < test_sig.size() ? test_sig[i] : 0;
+        const auto r = ref.find(sig);
+        if (r == ref.end() || r->second.first <= 0.0) {
+            continue;
+        }
+        used.insert(sig);
+        out.test.push_back(test_ms[i] / r->second.first);
+        out.test99.push_back((i < test_p99.size() ? test_p99[i] : test_ms[i]) /
+                             std::max(r->second.second, 1e-6));
+        out.test_ms.push_back(test_ms[i]);
+    }
+    for (const auto sig : used) {
+        const auto& r = ref.at(sig);
+        for (const auto i : by_sig.at(sig)) {
+            out.base.push_back(base_ms[i] / r.first);
+            out.base99.push_back((i < base_p99.size() ? base_p99[i] : base_ms[i]) /
+                                 std::max(r.second, 1e-6));
+            out.base_ms.push_back(base_ms[i]);
+        }
+    }
+    return out;
+}
+} // namespace
+
+void CentralBrain::UpdateCalibration(std::uint64_t, bool finishing) {
     if (cal_done || (!experiment && !baseline_session)) {
         return;
     }
+    const bool automatic = mode == Mode::Automatic;
     const std::uint64_t idle = ToNs(config.idle_input_seconds);
     const std::uint64_t input = last_input_ns.load(std::memory_order_relaxed);
     for (const auto& s : window.SecondsSince(cal_last_second + 1)) {
+        if (s.start_ns > scene_last_second) {
+            break; // not classified yet
+        }
         cal_last_second = s.start_ns;
         const bool warm =
             first_frame_ns != 0 && s.start_ns >= first_frame_ns + ToNs(config.warmup_min_seconds);
         const bool quiet = input == 0 || input + idle < s.start_ns;
-        if (s.frames < 10 || !warm || !quiet || ShaderMsPerFrame(s) > 2.0 || evaluation ||
+        std::uint64_t sig = 0;
+        const bool still = StillPictureSecond(s.start_ns, sig);
+        // Automatic mode measures only still pictures (pause, menus): the same scene can then be
+        // found again in another launch. Calibration mode measures any idle second, as the
+        // player was asked to leave the title screen running.
+        const bool usable = automatic ? still : quiet;
+        // A live test paused by this scene does not matter while its knob is on the old value.
+        const bool live_test_differs =
+            evaluation && knobs.Find(evaluation->knob) &&
+            knobs.Find(evaluation->knob)->value != evaluation->old_value;
+        if (s.frames < 10 || !warm || !usable || SceneOf(s.start_ns) == Scene::Loading ||
+            ShaderMsPerFrame(s) > 2.0 || live_test_differs ||
             (mode == Mode::Calibration && !learned_live_applied && CurrentProfile() &&
              !CurrentProfile()->validated.empty())) {
             continue;
         }
         cal_median.push_back(s.median_ms);
         cal_p99.push_back(s.p99_ms);
+        cal_signatures.push_back(automatic ? sig : 0);
         cal_hitches += s.hitches;
     }
-    cal_result = F("%.0f of %.0f idle seconds measured", static_cast<double>(cal_median.size()),
-                   static_cast<double>(config.calibration_target_seconds));
-    if (cal_median.size() < config.calibration_target_seconds) {
-        return;
-    }
-    cal_done = true;
     Profile* p = CurrentProfile();
     if (!p) {
         return;
     }
+    const std::size_t target =
+        finishing ? 0 : automatic && baseline_session ? 300 : config.calibration_target_seconds;
+    std::size_t have = cal_median.size();
+    MatchedSets m;
+    if (experiment) {
+        m = MatchScenes(p->baseline_seconds_ms, p->baseline_seconds_p99_ms, p->baseline_signatures,
+                        cal_median, cal_p99, cal_signatures);
+        have = m.test.size();
+    }
+    cal_result = F(experiment ? "%.0f of %.0f matching idle seconds measured"
+                              : "%.0f of %.0f idle seconds measured",
+                   static_cast<double>(have), static_cast<double>(target));
+    if (have < target) {
+        return;
+    }
+    cal_done = true;
     if (baseline_session) {
         p->baseline_seconds_ms.insert(p->baseline_seconds_ms.end(), cal_median.begin(),
                                       cal_median.end());
         p->baseline_seconds_p99_ms.insert(p->baseline_seconds_p99_ms.end(), cal_p99.begin(),
                                           cal_p99.end());
+        p->baseline_signatures.resize(p->baseline_seconds_ms.size() - cal_median.size(), 0);
+        p->baseline_signatures.insert(p->baseline_signatures.end(), cal_signatures.begin(),
+                                      cal_signatures.end());
         while (p->baseline_seconds_ms.size() > Profile::MaxBaselineSeconds) {
             p->baseline_seconds_ms.erase(p->baseline_seconds_ms.begin());
             p->baseline_seconds_p99_ms.erase(p->baseline_seconds_p99_ms.begin());
+            p->baseline_signatures.erase(p->baseline_signatures.begin());
         }
         cal_result = F("baseline recorded: %.0f idle seconds, median %.2f ms",
                        static_cast<double>(cal_median.size()), Stats::Percentile(cal_median, 0.5));
         Note("calibration: " + cal_result);
+        if (automatic) {
+            ExperimentRecord rec; // marks this launch, so tests and recordings take turns
+            rec.knob = "pause-screens";
+            rec.outcome = Outcome::Neutral;
+            rec.median_after_ms = Stats::Percentile(cal_median, 0.5);
+            rec.seconds_after = static_cast<std::uint32_t>(cal_median.size());
+            rec.unix_time = UnixNow();
+            rec.driver = fingerprint.driver;
+            rec.method = "launch-baseline";
+            p->history.push_back(rec);
+            if (p->history.size() > Profile::MaxHistory) {
+                p->history.erase(p->history.begin());
+            }
+        }
         SaveKnowledge();
         return;
     }
-    // Judge the experiment against the most recent baseline seconds.
-    const std::size_t take = std::min<std::size_t>(p->baseline_seconds_ms.size(), 300);
-    const std::vector<double> base(p->baseline_seconds_ms.end() - static_cast<std::ptrdiff_t>(take),
-                                   p->baseline_seconds_ms.end());
-    const std::vector<double> base99(p->baseline_seconds_p99_ms.end() -
-                                         static_cast<std::ptrdiff_t>(take),
-                                     p->baseline_seconds_p99_ms.end());
+    // Judge the experiment against baseline seconds of the same scenes.
     double pv = 1.0;
-    const double rate = static_cast<double>(cal_hitches) * 60.0 / static_cast<double>(cal_median.size());
-    const Outcome o = Judge(base, cal_median, base99, cal_p99, rate, rate, pv);
-    const auto cmp = Stats::Compare(base, cal_median);
+    const double rate = 0.0;
+    const Outcome o = Judge(m.base, m.test, m.base99, m.test99, rate, rate, pv);
+    const auto cmp = Stats::Compare(m.base, m.test);
     const auto& e = *experiment;
     ExperimentRecord rec;
     rec.knob = e.knob;
     rec.baseline_value = e.baseline_value;
     rec.value = e.value;
     rec.outcome = o;
-    rec.median_before_ms = cmp.median_a;
-    rec.median_after_ms = cmp.median_b;
-    rec.p99_before_ms = Stats::Percentile(base99, 0.5);
-    rec.p99_after_ms = Stats::Percentile(cal_p99, 0.5);
-    rec.seconds_before = static_cast<std::uint32_t>(base.size());
-    rec.seconds_after = static_cast<std::uint32_t>(cal_median.size());
+    rec.median_before_ms = Stats::Percentile(m.base_ms, 0.5);
+    rec.median_after_ms = Stats::Percentile(m.test_ms, 0.5);
+    rec.p99_before_ms = Stats::Percentile(m.base99, 0.5) * rec.median_before_ms;
+    rec.p99_after_ms = Stats::Percentile(m.test99, 0.5) * rec.median_before_ms;
+    rec.seconds_before = static_cast<std::uint32_t>(m.base.size());
+    rec.seconds_after = static_cast<std::uint32_t>(m.test.size());
     rec.p_value = pv;
     rec.unix_time = UnixNow();
     rec.driver = fingerprint.driver;
-    rec.method = "launch-ab";
+    rec.method = automatic ? "launch-ab-still" : "launch-ab";
     p->history.push_back(rec);
     const KnobState* st = knobs.Find(e.knob);
     const std::int64_t def = st ? st->spec.default_value : 0;
@@ -862,16 +1294,62 @@ void CentralBrain::UpdateCalibration(std::uint64_t) {
         // The best configuration changed: the old baseline no longer describes it.
         p->baseline_seconds_ms.clear();
         p->baseline_seconds_p99_ms.clear();
+        p->baseline_signatures.clear();
     } else if (o == Outcome::Regressed) {
         p->rejected[e.knob][e.value] = Outcome::Regressed;
     }
     p->revalidate.erase(e.knob);
     knowledge.session_experiment.reset(); // judged: a later crash is not this value's fault
     cal_result = e.knob + "=" + std::to_string(e.value) + " " + std::string(ToString(o)) +
-                 F(" (median %.2f -> %.2f ms, %+.1f%%, p = %.3f)", cmp.median_a, cmp.median_b,
-                   cmp.relative_change * 100.0, pv);
-    Note("calibration: " + cal_result);
+                 F(" (same-scene median %.2f -> %.2f ms, %+.1f%%, p = %.3f)",
+                   rec.median_before_ms, rec.median_after_ms, cmp.relative_change * 100.0, pv);
+    Note("start-up test: " + cal_result);
     SaveKnowledge();
+}
+
+void CentralBrain::DecideNextPerfMode() {
+    Profile* p = CurrentProfile();
+    if (!p || launch_perf_mode < 0 || config.fps_target == 0) {
+        return;
+    }
+    static constexpr const char* Names[] = {"off", "low", "office"};
+    const auto& play = scene_stats[static_cast<std::size_t>(Scene::Gameplay)].medians;
+    const std::int32_t lo = static_cast<std::int32_t>(config.perf_mode_floor);
+    const std::int32_t hi = static_cast<std::int32_t>(config.perf_mode_max);
+    std::int32_t next = launch_perf_mode;
+    const double target_ms = 1000.0 / static_cast<double>(config.fps_target);
+    if (play.size() < 120) {
+        perf_mode_decision = F("only %.0f s of gameplay this launch (120 needed); performance "
+                               "mode stays ",
+                               static_cast<double>(play.size())) +
+                             Names[launch_perf_mode];
+    } else {
+        const double med = Stats::Percentile(play, 0.5);
+        const double busy =
+            gameplay_gpu_busy.size() >= 60 ? Stats::Percentile(gameplay_gpu_busy, 0.5) : 0.0;
+        if (med > target_ms * 1.08 && launch_perf_mode < hi) {
+            next = launch_perf_mode + 1;
+            perf_mode_decision = F("gameplay ran at %.1f fps (target %.0f): next launch uses "
+                                   "performance mode ",
+                                   1000.0 / med, static_cast<double>(config.fps_target)) +
+                                 Names[next];
+        } else if (med <= target_ms * 1.03 && launch_perf_mode > lo && busy > 0.0 &&
+                   busy < target_ms * 0.65) {
+            // On target with the card idle a third of the time: try more quality.
+            next = launch_perf_mode - 1;
+            perf_mode_decision = F("gameplay held %.1f fps with the graphics card busy only "
+                                   "%.1f ms of %.1f: next launch tries performance mode ",
+                                   1000.0 / med, busy, target_ms) +
+                                 Names[next];
+        } else {
+            perf_mode_decision = F("gameplay ran at %.1f fps (target %.0f); performance mode "
+                                   "stays ",
+                                   1000.0 / med, static_cast<double>(config.fps_target)) +
+                                 Names[launch_perf_mode];
+        }
+    }
+    p->auto_perf_mode = next;
+    Note("frame-rate target: " + perf_mode_decision);
 }
 
 void CentralBrain::Log(const std::string& proposer, const std::string& knob, std::int64_t from,
@@ -1031,6 +1509,16 @@ void CentralBrain::UpdateStatus(std::uint64_t) {
     v.ticks = ticks;
     v.dropped_frames = dropped_frames;
     v.kill_switch = gate.KillSwitchTripped();
+    if (launch_perf_mode >= 0) {
+        static constexpr const char* Names[] = {"off", "low", "office"};
+        v.fps_target = std::to_string(config.fps_target) + " fps target: performance mode " +
+                       Names[launch_perf_mode] + " this launch" +
+                       (perf_mode_decision.empty() ? "" : "; " + perf_mode_decision);
+    }
+    v.scene_switches = switches.size();
+    for (const auto& sw : switches) {
+        v.worst_switch_ms = std::max(v.worst_switch_ms, sw.worst_ms);
+    }
     std::scoped_lock lk{status_mutex};
     status = std::move(v);
 }
@@ -1081,28 +1569,47 @@ std::filesystem::path CentralBrain::Shutdown(bool crashed) {
     ProcessCommands();
     const std::uint64_t now = clock();
     if (evaluation) {
-        FinishEvaluation(Outcome::Abandoned, "the game was closed during the measurement", now);
+        if (evaluation->confirm_only || crashed) {
+            FinishEvaluation(Outcome::Abandoned, "the game was closed during the measurement",
+                             now);
+        } else {
+            KeepPartialEvaluation("the game was closed during the measurement", now);
+        }
     }
     knobs.ResetLiveToDefaults(now);
     Profile* p = CurrentProfile();
+    std::size_t measured = cal_median.size();
+    if (p && experiment) {
+        measured = MatchScenes(p->baseline_seconds_ms, p->baseline_seconds_p99_ms,
+                               p->baseline_signatures, cal_median, cal_p99, cal_signatures)
+                       .test.size();
+    }
     if (p && !cal_done && (experiment || baseline_session)) {
-        if (experiment && cal_median.size() < config.calibration_min_seconds) {
+        if (experiment && measured < config.calibration_min_seconds) {
             ExperimentRecord rec;
             rec.knob = experiment->knob;
             rec.baseline_value = experiment->baseline_value;
             rec.value = experiment->value;
             rec.outcome = Outcome::Abandoned;
-            rec.seconds_after = static_cast<std::uint32_t>(cal_median.size());
+            rec.seconds_after = static_cast<std::uint32_t>(measured);
             rec.unix_time = UnixNow();
             rec.driver = fingerprint.driver;
-            rec.method = "launch-ab";
+            rec.method = mode == Mode::Automatic ? "launch-ab-still" : "launch-ab";
             p->history.push_back(rec);
-            Note("calibration: only " + std::to_string(cal_median.size()) +
-                 " idle seconds measured; the experiment is repeated next launch");
-        } else if (cal_median.size() >= config.calibration_min_seconds) {
-            config.calibration_target_seconds = static_cast<std::uint32_t>(cal_median.size());
-            UpdateCalibration(now);
+            Note("start-up test: only " + std::to_string(measured) +
+                 (mode == Mode::Automatic ? " seconds of pause / menu screens seen before"
+                                          : " idle seconds") +
+                 " measured; the test is repeated in a later launch");
+        } else if (experiment ||
+                   cal_median.size() >= (mode == Mode::Automatic ? 20u
+                                                                 : config.calibration_min_seconds)) {
+            // Judge / record with what was measured (Automatic mode collects still pictures for
+            // as long as the session runs).
+            UpdateCalibration(now, true);
         }
+    }
+    if (p && launch_perf_mode >= 0) {
+        DecideNextPerfMode();
     }
     if (p) {
         std::string top;
@@ -1151,6 +1658,71 @@ std::filesystem::path CentralBrain::Shutdown(bool crashed) {
         reports.erase(reports.begin());
     }
     return out ? path : std::filesystem::path{};
+}
+
+static std::string DescribeSwitches(const std::deque<SceneSwitch>& switches) {
+    std::ostringstream o;
+    o << "== Scene switches\n";
+    if (switches.empty()) {
+        o << "  none\n";
+        return o.str();
+    }
+    // Where the time of the freezes went, in groups a player can act on.
+    struct Group {
+        const char* name;
+        std::vector<StallKind> kinds;
+    };
+    const std::vector<Group> groups = {
+        {"shader compiling",
+         {StallKind::ShaderTranslate, StallKind::PipelineCreate, StallKind::PipelineWait}},
+        {"loading data to the graphics card",
+         {StallKind::BufferUpload, StallKind::TextureUpload, StallKind::UploadWait,
+          StallKind::UploadThread, StallKind::Residency, StallKind::SparseBind}},
+        {"memory shared with the game (page faults, read-backs)",
+         {StallKind::PageFault, StallKind::PageProtect, StallKind::PageProtectGpu,
+          StallKind::ReadbackWait, StallKind::BufferDownload}},
+        {"graphics card busy", {StallKind::GpuWait}},
+    };
+    std::size_t freezes = 0;
+    double worst = 0.0;
+    std::vector<double> group_ms(groups.size(), 0.0);
+    std::vector<const SceneSwitch*> bad;
+    for (const auto& sw : switches) {
+        worst = std::max(worst, sw.worst_ms);
+        if (sw.worst_ms < 150.0) {
+            continue;
+        }
+        ++freezes;
+        bad.push_back(&sw);
+        for (std::size_t g = 0; g < groups.size(); ++g) {
+            for (const auto k : groups[g].kinds) {
+                group_ms[g] += sw.stall_ms[static_cast<std::size_t>(k)];
+            }
+        }
+    }
+    o << "  " << switches.size() << " switches, " << freezes
+      << F(" with a freeze over 150 ms (worst %.0f ms)\n", worst);
+    double total = 0.0;
+    for (const double v : group_ms) {
+        total += v;
+    }
+    if (total > 0.0) {
+        o << "  in those freezes the time went to:";
+        for (std::size_t g = 0; g < groups.size(); ++g) {
+            if (group_ms[g] > 0.0) {
+                o << ' ' << groups[g].name << F(" %.0f%%;", 100.0 * group_ms[g] / total);
+            }
+        }
+        o << '\n';
+    }
+    std::sort(bad.begin(), bad.end(),
+              [](const SceneSwitch* a, const SceneSwitch* b) { return a->worst_ms > b->worst_ms; });
+    for (std::size_t i = 0; i < std::min<std::size_t>(bad.size(), 5); ++i) {
+        const auto& sw = *bad[i];
+        o << F("  %8.1f s ", static_cast<double>(sw.t_ns) / 1e9) << ToString(sw.from) << " -> "
+          << ToString(sw.to) << F(": worst frame %.0f ms", sw.worst_ms) << '\n';
+    }
+    return o.str();
 }
 
 std::string CentralBrain::Report() const {
@@ -1226,6 +1798,24 @@ std::string CentralBrain::BuildReport() const {
     o << "time by bottleneck:";
     for (const auto& [name, secs] : bottleneck_seconds) {
         o << ' ' << name << ' ' << secs << " s;";
+    }
+    o << "\n\n== Scenes (this launch)\n";
+    for (std::size_t i = 0; i < NumScenes; ++i) {
+        const auto& st = scene_stats[i];
+        if (st.seconds == 0) {
+            continue;
+        }
+        const double med = Stats::Percentile(st.medians, 0.5);
+        o << "  " << ToString(static_cast<Scene>(i)) << ": " << st.seconds << " s"
+          << (med > 0.0 ? F(", median frame %.1f ms (%.1f fps)", med, 1000.0 / med) : "") << '\n';
+    }
+    if (!gameplay_gpu_busy.empty()) {
+        o << F("  graphics card busy in gameplay: %.1f ms a frame (median)\n",
+               Stats::Percentile(gameplay_gpu_busy, 0.5));
+    }
+    o << '\n' << DescribeSwitches(switches);
+    if (!perf_mode_decision.empty()) {
+        o << "\n== Frame-rate target\n  " << perf_mode_decision << '\n';
     }
     o << "\n\n== Mini-brains\n";
     for (const auto& b : brains) {

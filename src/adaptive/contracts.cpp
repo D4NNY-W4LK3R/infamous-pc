@@ -73,6 +73,22 @@ std::string_view ToString(StallKind kind) {
     return i < NumStallKinds ? names[i] : "?";
 }
 
+std::string_view ToString(Scene scene) {
+    switch (scene) {
+    case Scene::Unknown:
+        return "unknown";
+    case Scene::Gameplay:
+        return "gameplay";
+    case Scene::Cutscene:
+        return "cutscene / watching";
+    case Scene::Menu:
+        return "menu / pause";
+    case Scene::Loading:
+        return "loading / video";
+    }
+    return "unknown";
+}
+
 std::string_view ToString(Bottleneck b) {
     switch (b) {
     case Bottleneck::Unknown:

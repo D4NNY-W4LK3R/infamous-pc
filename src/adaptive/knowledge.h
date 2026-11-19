@@ -47,6 +47,18 @@ struct ExperimentRecord {
     std::string method; ///< "live-abab" or "launch-ab"
 };
 
+/// A live A/B test that a session ended before it was finished: its seconds are kept and the
+/// next session continues it (same knob, same values) instead of starting over.
+struct PartialEvaluation {
+    std::string knob;
+    std::int64_t old_value = 0;
+    std::int64_t new_value = 0;
+    std::vector<double> a_median, b_median, a_p99, b_p99;
+    std::uint32_t a_hitches = 0, b_hitches = 0;
+    std::int64_t started_unix = 0;
+    std::uint32_t sessions = 1; ///< sessions that contributed seconds
+};
+
 struct Profile {
     Fingerprint fingerprint;
     std::map<std::string, std::int64_t> validated; ///< knob -> value proven not worse
@@ -64,6 +76,12 @@ struct Profile {
     /// Per-second medians of baseline (all-default) calibration sessions, newest last, capped.
     std::vector<double> baseline_seconds_ms;
     std::vector<double> baseline_seconds_p99_ms;
+    /// Scene signature of each baseline second (0 = unknown, from schema 2): start-up tests
+    /// compare only seconds of the same scene.
+    std::vector<std::uint64_t> baseline_signatures;
+    std::optional<PartialEvaluation> partial;
+    /// Performance mode the fps-target controller chose for the next launch (-1 = none yet).
+    std::int32_t auto_perf_mode = -1;
 
     static constexpr std::size_t MaxHistory = 256;
     static constexpr std::size_t MaxBaselineSeconds = 1200;
@@ -118,9 +136,9 @@ private:
 };
 
 /// Applies the invalidation rules of Architecture v1.0 sec. 1 to the profile for `current`:
-/// returns the profile (created if missing) after marking it for revalidation when the driver
-/// changed. Profiles are keyed by hardware + game + emulator, so a change of any of those
-/// starts a separate profile and the old one simply stops being used.
+/// returns the profile (created if missing) after marking its learned values for re-checking
+/// when the GPU driver or the emulator build changed. Profiles are keyed by hardware + game, so
+/// what was learned survives emulator updates (as values to re-check, not as values to trust).
 Profile& SelectProfile(Knowledge& k, const Fingerprint& current, std::vector<std::string>& notes);
 
 } // namespace Adaptive

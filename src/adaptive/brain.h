@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -49,11 +50,23 @@ struct BrainConfig {
     std::filesystem::path data_dir; ///< knowledge.txt, reports/ live here
     std::uint32_t tick_ms = 1000;
     bool calibrate_on_battery = false;
-    // Live A/B evaluation: alternate old / new value in blocks, discard the settle time.
-    double eval_block_seconds = 15.0;
-    std::uint32_t eval_blocks = 8; ///< 4 with the new value, 4 with the old, interleaved
+    // Live A/B evaluation: alternate old / new value in blocks of counted seconds (seconds of
+    // another scene, shader compiling or settling do not count), so a cutscene pauses a test
+    // instead of cancelling it.
+    double eval_block_seconds = 10.0; ///< counted seconds per block, settle included
+    std::uint32_t eval_blocks = 8;    ///< 4 with the new value, 4 with the old, interleaved
     double settle_seconds = 2.0;
-    double eval_timeout_seconds = 600.0;
+    /// A test that has not finished after this long stops for now; its seconds are kept and a
+    /// later session continues it.
+    double eval_timeout_seconds = 1800.0;
+    /// Start-up tests in Automatic mode: judged only on still pictures (pause, menus) that also
+    /// appear in the baseline, so the same scene is compared.
+    bool automatic_startup_tests = true;
+    // Frame-rate target (fps_target in settings.ini): the optimizer picks the game's quality
+    // level per launch, never below the user's limit.
+    std::uint32_t fps_target = 0;      ///< 0 = off
+    std::uint32_t perf_mode_floor = 0; ///< the player's own choice (0 off, 1 low, 2 office)
+    std::uint32_t perf_mode_max = 0;   ///< the lowest quality the player allows
     // Launch A/B calibration.
     std::uint32_t calibration_target_seconds = 90;
     std::uint32_t calibration_min_seconds = 30;
@@ -113,10 +126,31 @@ struct StatusView {
     std::uint64_t ticks = 0;
     std::uint64_t dropped_frames = 0;
     bool kill_switch = false;
+    std::string fps_target; ///< what the frame-rate target chose, empty when it is off
+    std::size_t scene_switches = 0;
+    double worst_switch_ms = 0.0;
+};
+
+/// A switch between scenes and what the next few seconds cost (Architecture v1.1).
+struct SceneSwitch {
+    std::uint64_t t_ns = 0;
+    Scene from = Scene::Unknown;
+    Scene to = Scene::Unknown;
+    double worst_ms = 0.0;
+    std::uint32_t frames_over_100ms = 0;
+    std::array<double, NumStallKinds> stall_ms{}; ///< summed over the switch's seconds
+    std::uint32_t seconds_left = 0;               ///< still being measured while > 0
+};
+
+struct SceneStats {
+    std::uint32_t seconds = 0;
+    std::vector<double> medians; ///< capped
 };
 
 struct StartupResult {
     LoadStatus load_status = LoadStatus::Fresh;
+    /// Performance mode for this launch chosen by the fps-target controller (-1: not in use).
+    std::int32_t perf_mode = -1;
     std::map<std::string, std::int64_t> launch_values; ///< set in the environment by the brain
     std::optional<PendingExperiment> experiment;
     std::vector<std::string> notes;
@@ -191,6 +225,10 @@ public:
     /// Exposed for tests.
     static Bottleneck Diagnose(const Snapshot& s, double vram_pressure, bool warmup,
                                double& confidence);
+    /// One second's scene. still_run: consecutive seconds that showed this same still picture.
+    static Scene ClassifySecond(const SecondSummary& s, bool input_recent,
+                                std::uint32_t still_run);
+    std::vector<SceneSwitch> SceneSwitches() const;
 
 private:
     struct Evaluation {
@@ -209,11 +247,23 @@ private:
         std::uint32_t slow_streak = 0;  ///< consecutive slow seconds with the new value
         std::deque<bool> recent_spikes; ///< spike flags of the latest new-value seconds
         std::uint32_t compile_seconds_skipped = 0; ///< seconds left out: shaders were compiling
+        std::uint32_t other_scene_seconds = 0;     ///< seconds left out: another scene
+        Scene scene = Scene::Unknown;              ///< the scene this test measures
+        std::uint32_t block_counted = 0;           ///< counted seconds in the current block
+        std::uint32_t settle_left = 0;             ///< seconds still to skip after a switch
+        std::uint32_t resumed_sessions = 0;        ///< earlier sessions this test continues
+        bool paused = false; ///< another scene: the knob is back on the old value meanwhile
         std::string reason;
     };
 
     void ProcessCommands();
-    void UpdateCalibration(std::uint64_t now);
+    void ClassifySeconds();
+    Scene SceneOf(std::uint64_t second_start) const;
+    void ResumePartialEvaluation(std::uint64_t now);
+    void KeepPartialEvaluation(const std::string& why, std::uint64_t now);
+    void DecideNextPerfMode();
+    bool StillPictureSecond(std::uint64_t second_start, std::uint64_t& signature) const;
+    void UpdateCalibration(std::uint64_t now, bool finishing = false);
     void AdvanceEvaluation(std::uint64_t now);
     void FinishEvaluation(Outcome outcome, const std::string& why, std::uint64_t now);
     void ConsiderProposals(std::uint64_t now);
@@ -265,10 +315,31 @@ private:
     std::vector<std::string> notes;
     std::map<std::string, std::uint32_t> bottleneck_seconds;
 
+    // Scenes (one entry per classified second, capped) and switches between them.
+    struct SceneSecond {
+        std::uint64_t start_ns = 0;
+        Scene scene = Scene::Unknown;
+        std::uint64_t signature = 0;
+    };
+    std::deque<SceneSecond> scene_seconds;
+    /// Input moments seen at each tick (the latest input time then), for classifying seconds
+    /// once the few seconds after them are known too.
+    std::deque<std::uint64_t> input_times;
+    std::uint64_t scene_last_second = 0;
+    std::uint64_t still_signature = 0;
+    std::uint32_t still_run = 0;
+    Scene last_scene = Scene::Unknown;
+    std::array<SceneStats, NumScenes> scene_stats{};
+    std::vector<double> gameplay_gpu_busy; ///< per-second host GPU ms in gameplay (capped)
+    std::deque<SceneSwitch> switches;      ///< newest last, capped
+    std::int32_t launch_perf_mode = -1;    ///< chosen by the fps-target controller
+    std::string perf_mode_decision;
+
     // This launch's calibration measurement.
     std::optional<PendingExperiment> experiment;
     bool baseline_session = false;
     std::vector<double> cal_median, cal_p99;
+    std::vector<std::uint64_t> cal_signatures;
     std::uint32_t cal_hitches = 0;
     std::uint64_t cal_last_second = 0;
     bool cal_done = false;

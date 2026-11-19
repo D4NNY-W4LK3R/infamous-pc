@@ -77,6 +77,14 @@ void SettingsWindow::LoadSettings(std::string profile) {
         perfModeSetting = static_cast<int>(std::min<u32>(patches.perf_mode, 2));
         particleLateReadSetting = patches.particle_late_read;
         particleLightsSetting = patches.particle_light_one_submit;
+        const auto target = Adaptive::Glue::GetFpsTarget();
+        const auto it = std::find(fpsTargetValues.begin(), fpsTargetValues.end(), target.fps);
+        fpsTargetSetting =
+            it == fpsTargetValues.end() ? 1 : static_cast<int>(it - fpsTargetValues.begin());
+        if (target.fps == 0) {
+            fpsTargetSetting = 0;
+        }
+        lowestQualitySetting = static_cast<int>(std::min<u32>(target.lowest_quality, 2));
     }
     windowHeightSetting = EmulatorSettings.GetWindowHeight();
     windowWidthSetting = EmulatorSettings.GetWindowWidth();
@@ -149,6 +157,13 @@ void SettingsWindow::SaveSettings(std::string profile) {
             now.particle_late_read != before.particle_late_read ||
             now.particle_light_one_submit != before.particle_light_one_submit) {
             Adaptive::Glue::SetGamePatches(now);
+        }
+        const auto target_before = Adaptive::Glue::GetFpsTarget();
+        const Adaptive::Glue::FpsTarget target_now{fpsTargetValues.at(fpsTargetSetting),
+                                                   static_cast<u32>(lowestQualitySetting)};
+        if (target_now.fps != target_before.fps ||
+            target_now.lowest_quality != target_before.lowest_quality) {
+            Adaptive::Glue::SetFpsTarget(target_now);
         }
     }
     EmulatorSettings.SetWindowHeight(windowHeightSetting, isSpecific);
@@ -765,6 +780,12 @@ void SettingsWindow::DrawSettingsTable(SettingsCategory category) {
                             frameLimitOptions);
             AddSettingCombo("Second Son: Performance Mode (next launch)", perfModeSetting,
                             perfModeOptions);
+            AddSettingCombo("Optimizer: Frame-Rate Target (next launch)", fpsTargetSetting,
+                            fpsTargetOptions);
+            if (fpsTargetSetting != 0) {
+                AddSettingCombo("Optimizer: Lowest Quality It May Use", lowestQualitySetting,
+                                lowestQualityOptions);
+            }
             AddSettingCheckbox("Second Son: Particle Timing Fix (next launch)",
                                particleLateReadSetting);
             if (particleLateReadSetting) {

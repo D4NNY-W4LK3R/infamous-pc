@@ -97,6 +97,21 @@ UserSettings ParseSettings(const std::string& text) {
             } else {
                 s.warnings.push_back("perf_mode must be off, low or office");
             }
+        } else if (key == "fps_target") {
+            std::uint32_t v = 0;
+            const auto r = std::from_chars(value.data(), value.data() + value.size(), v);
+            if (r.ec != std::errc{} || (v != 0 && (v < 15 || v > 240))) {
+                s.warnings.push_back("fps_target must be 0 (off) or 15..240");
+                continue;
+            }
+            s.fps_target = v;
+        } else if (key == "auto_perf_max") {
+            const auto parsed = ParseSettings("perf_mode = " + value + "\n");
+            if (!parsed.warnings.empty()) {
+                s.warnings.push_back("auto_perf_max must be off, low or office");
+                continue;
+            }
+            s.auto_perf_max = parsed.perf_mode;
         } else if (key == "particle_late_read" || key == "particle_light_one_submit") {
             const auto b = ParseBool(value);
             if (!b) {
@@ -140,6 +155,11 @@ std::string SerializeSettings(const UserSettings& s) {
     o << "perf_mode = " << (s.perf_mode == 1 ? "low" : s.perf_mode == 2 ? "office" : "off") << '\n';
     o << "particle_late_read = " << (s.particle_late_read ? 1 : 0) << '\n';
     o << "particle_light_one_submit = " << (s.particle_light_one_submit ? 1 : 0) << '\n';
+    o << "# frame-rate target: the optimizer picks the performance mode per launch, from\n"
+         "# perf_mode (your choice) down to auto_perf_max (off | low | office); 0 = off\n";
+    o << "fps_target = " << s.fps_target << '\n';
+    o << "auto_perf_max = "
+      << (s.auto_perf_max == 1 ? "low" : s.auto_perf_max == 2 ? "office" : "off") << '\n';
     return o.str();
 }
 

@@ -49,6 +49,13 @@ struct SecondSummary {
     double max_ms = 0.0;
     std::uint32_t hitches = 0;
     std::array<double, NumStallKinds> stall_ms{}; ///< summed over the second
+    std::uint32_t draws_median = 0;
+    std::uint32_t dispatches_median = 0;
+    /// Every frame of the second drew exactly the same (a still picture).
+    bool same_every_frame = false;
+    /// Identifies a still picture across seconds and launches (0 = not a still picture).
+    std::uint64_t signature = 0;
+    double gpu_busy_median_ms = 0.0;
 };
 
 /// Keeps a rolling window of frames and per-second summaries and builds Snapshots from them.
