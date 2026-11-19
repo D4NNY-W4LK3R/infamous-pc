@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <cmath>
 #include <chrono>
 #include <cstdio>
 #include <ctime>
@@ -1345,10 +1346,23 @@ void CentralBrain::DecideNextPerfMode() {
         const double med = Stats::Percentile(play, 0.5);
         const double busy =
             gameplay_gpu_busy.size() >= 60 ? Stats::Percentile(gameplay_gpu_busy, 0.5) : 0.0;
+        LadderMemory mem;
+        mem.prev_busy_ms = p->auto_prev_busy_x10 / 10.0;
+        mem.prev = {p->auto_prev_perf, p->auto_prev_height ? p->auto_prev_height : 1080u};
+        mem.has_stop = p->auto_stop_perf >= 0;
+        mem.stop = {static_cast<std::uint32_t>(std::max(p->auto_stop_perf, 0)),
+                    p->auto_stop_height ? p->auto_stop_height : 1080u};
         const LadderDecision d = DecideStep(quality_ladder, launch_step, med, busy,
-                                            static_cast<double>(config.fps_target));
+                                            static_cast<double>(config.fps_target), mem);
         next = d.next;
         perf_mode_decision = d.reason;
+        p->auto_prev_busy_x10 =
+            static_cast<std::uint32_t>(std::lround(std::max(0.0, d.memory.prev_busy_ms) * 10.0));
+        p->auto_prev_perf = d.memory.prev.perf_mode;
+        p->auto_prev_height = d.memory.prev.render_height;
+        p->auto_stop_perf = d.memory.has_stop ? static_cast<std::int32_t>(d.memory.stop.perf_mode)
+                                              : -1;
+        p->auto_stop_height = d.memory.has_stop ? d.memory.stop.render_height : 0;
     }
     p->auto_perf_mode = static_cast<std::int32_t>(quality_ladder[next].perf_mode);
     p->auto_render_height = quality_ladder[next].render_height;

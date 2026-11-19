@@ -85,6 +85,13 @@ struct Profile {
     /// Render height the frame-rate target chose with auto_perf_mode (0 = the game's own). Kept
     /// as a second number on the autoperf line: builds before 30 read the first and ignore it.
     std::uint32_t auto_render_height = 0;
+    /// The quality ladder's memory (quality_ladder.h LadderMemory), more numbers on the same line
+    /// (build 33): the step before the last step down and the card's busy time there (0.1 ms),
+    /// and the step it should not go below (-1 = none).
+    std::uint32_t auto_prev_busy_x10 = 0;
+    std::uint32_t auto_prev_perf = 0, auto_prev_height = 0;
+    std::int32_t auto_stop_perf = -1;
+    std::uint32_t auto_stop_height = 0;
 
     static constexpr std::size_t MaxHistory = 256;
     static constexpr std::size_t MaxBaselineSeconds = 1200;

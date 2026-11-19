@@ -354,7 +354,7 @@ TEST(KnowledgeStore, RenderHeightRidesOnTheAutoperfLine) {
     p.auto_perf_mode = 1;
     p.auto_render_height = 792;
     std::string text = KnowledgeStore::Serialize(k);
-    ASSERT_NE(text.find("autoperf 1 792\n"), std::string::npos);
+    ASSERT_NE(text.find("autoperf 1 792 "), std::string::npos);
     Knowledge back;
     bool sc = false;
     ASSERT_TRUE(KnowledgeStore::Parse(text, back, sc));
@@ -362,11 +362,31 @@ TEST(KnowledgeStore, RenderHeightRidesOnTheAutoperfLine) {
     EXPECT_EQ(back.profiles.at("abc").auto_render_height, 792u);
     // A line from a build before 30 (no height) still reads: the game's own size.
     text = text.substr(0, text.rfind("checksum "));
-    const auto at = text.find("autoperf 1 792\n");
-    text.replace(at, std::string("autoperf 1 792\n").size(), "autoperf 2\n");
+    const auto at = text.find("autoperf 1 792 ");
+    text.replace(at, text.find('\n', at) + 1 - at, "autoperf 2\n");
     text += "checksum " + Hex64(Fnv1a64(text.data(), text.size())) + "\n";
     Knowledge old;
     ASSERT_TRUE(KnowledgeStore::Parse(text, old, sc));
     EXPECT_EQ(old.profiles.at("abc").auto_perf_mode, 2);
     EXPECT_EQ(old.profiles.at("abc").auto_render_height, 0u);
+    EXPECT_EQ(old.profiles.at("abc").auto_stop_perf, -1);
+}
+
+TEST(KnowledgeStore, LadderMemoryRoundTrip) {
+    Knowledge k = Sample();
+    Profile& p = k.profiles.at("abc");
+    p.auto_perf_mode = 1;
+    p.auto_render_height = 1080;
+    p.auto_prev_busy_x10 = 312;
+    p.auto_prev_perf = 1;
+    p.auto_prev_height = 1080;
+    p.auto_stop_perf = 1;
+    p.auto_stop_height = 1080;
+    Knowledge back;
+    bool sc = false;
+    ASSERT_TRUE(KnowledgeStore::Parse(KnowledgeStore::Serialize(k), back, sc));
+    const Profile& q = back.profiles.at("abc");
+    EXPECT_EQ(q.auto_prev_busy_x10, 312u);
+    EXPECT_EQ(q.auto_stop_perf, 1);
+    EXPECT_EQ(q.auto_stop_height, 1080u);
 }

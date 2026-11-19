@@ -127,7 +127,9 @@ std::string KnowledgeStore::Serialize(const Knowledge& k) {
               << '\n';
         }
         if (p.auto_perf_mode >= 0) {
-            o << "autoperf " << p.auto_perf_mode << ' ' << p.auto_render_height << '\n';
+            o << "autoperf " << p.auto_perf_mode << ' ' << p.auto_render_height << ' '
+              << p.auto_prev_busy_x10 << ' ' << p.auto_prev_perf << ' ' << p.auto_prev_height
+              << ' ' << p.auto_stop_perf << ' ' << p.auto_stop_height << '\n';
         }
         if (p.partial) {
             const auto& e = *p.partial;
@@ -348,6 +350,15 @@ bool KnowledgeStore::Parse(const std::string& text, Knowledge& out, bool& schema
             std::uint32_t h = 0;
             if (ls >> h) { // build 30 on; older lines end after the mode
                 cur->auto_render_height = h;
+            }
+            std::uint32_t busy = 0, pp = 0, ph = 0, sh = 0;
+            std::int32_t sp = -1;
+            if (ls >> busy >> pp >> ph >> sp >> sh && pp <= 2 && sp >= -1 && sp <= 2) {
+                cur->auto_prev_busy_x10 = busy; // build 33 on
+                cur->auto_prev_perf = pp;
+                cur->auto_prev_height = ph;
+                cur->auto_stop_perf = sp;
+                cur->auto_stop_height = sh;
             }
         } else if (tag == "partial" && cur) {
             PartialEvaluation e;

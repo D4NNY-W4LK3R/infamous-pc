@@ -30,9 +30,56 @@ TEST(QualityLadder, FindStepExactOrClosest) {
     const auto l = BuildLadder({0, 2, 1080, 720});
     EXPECT_EQ(FindStep(l, {1, 864}), 4u);
     EXPECT_EQ(FindStep(l, {2, 720}), 7u);
-    // The player raised the smallest size to 864 after the target reached 720: the closest.
+    // The player raised the smallest size to 864 after the target reached 720: the step with
+    // the closest estimated load.
     const auto narrower = BuildLadder({0, 2, 1080, 864});
-    EXPECT_EQ(narrower[FindStep(narrower, {1, 720})], (QualityStep{1, 864}));
+    EXPECT_EQ(narrower[FindStep(narrower, {2, 864})], (QualityStep{2, 864}));
+    EXPECT_EQ(narrower[FindStep(narrower, {1, 720})], (QualityStep{2, 864}));
+}
+
+TEST(QualityLadder, OfficeAt1080IsNotTheBottomOnceSmallerSizesAreAllowed) {
+    // Build 32 (a player's report): office at 1080 was stored, then the smallest size was set to
+    // 1152x648 - the target jumped to office at 648, the worst picture, for no reason.
+    const auto l = BuildLadder({1, 2, 1080, 648});
+    const QualityStep picked = l[FindStep(l, {2, 1080})];
+    EXPECT_NE(picked, (QualityStep{2, 648}));
+    EXPECT_EQ(picked.perf_mode, 1u) << "a load like office at 1080 is found at low";
+    EXPECT_NEAR(EstimatedCost(picked), EstimatedCost({2, 1080}), 0.05);
+}
+
+TEST(QualityLadder, NoLessDetailWhenTheCardIsNotTheLimit) {
+    const auto l = BuildLadder({0, 2, 1080, 720});
+    // 26 fps, but the card is busy only 20 ms of the 33.3: freezes or the CPU, not the card.
+    const auto d = DecideStep(l, 1, 38.0, 20.0, 30);
+    EXPECT_EQ(d.next, 1u);
+    EXPECT_NE(d.reason.find("not the limit"), std::string::npos);
+}
+
+TEST(QualityLadder, AStepThatDidNotPayOffIsUndoneAndNotTakenAgain) {
+    const auto l = BuildLadder({1, 2, 1080, 648});
+    // Launch 1 at low 1080: 26 fps, card busy 31 ms -> down.
+    auto d = DecideStep(l, 0, 38.0, 31.0, 30);
+    ASSERT_EQ(d.next, 1u);
+    EXPECT_DOUBLE_EQ(d.memory.prev_busy_ms, 31.0);
+    // Launch 2 at low 1008: still 26 fps, card 30 ms (3% saved) -> back to low 1080 and stop.
+    d = DecideStep(l, 1, 38.0, 30.0, 30, d.memory);
+    EXPECT_EQ(d.next, 0u);
+    EXPECT_TRUE(d.memory.has_stop);
+    EXPECT_EQ(d.memory.stop, (QualityStep{1, 1080}));
+    EXPECT_NE(d.reason.find("saved only 3%"), std::string::npos);
+    // Launch 3 at low 1080, slow again: it stays.
+    d = DecideStep(l, 0, 38.0, 31.0, 30, d.memory);
+    EXPECT_EQ(d.next, 0u);
+}
+
+TEST(QualityLadder, AStepThatPaidOffIsKept) {
+    const auto l = BuildLadder({1, 2, 1080, 648});
+    auto d = DecideStep(l, 0, 38.0, 31.0, 30);
+    ASSERT_EQ(d.next, 1u);
+    // At 1008: card 26 ms (16% saved), 30 fps: kept, no stop.
+    d = DecideStep(l, 1, 33.4, 26.0, 30, d.memory);
+    EXPECT_EQ(d.next, 1u);
+    EXPECT_FALSE(d.memory.has_stop);
 }
 
 TEST(QualityLadder, DecideStepsDownUpOrStays) {

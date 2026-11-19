@@ -14,11 +14,13 @@
 namespace Vulkan {
 
 namespace {
-/// SS_FAST_FIRST_COMPILE=0 builds a new compute pipeline met in game with optimizations at once.
+/// SS_FAST_FIRST_COMPILE=1 builds a new compute pipeline met in game without optimizations first.
+/// Off by default since build 33: on a GTX 1650 (driver 616.56) the unoptimized builds took
+/// longer (median 289 ms, against 174 ms optimized), so they only added work.
 bool FastFirstCompile() {
     static const bool on = [] {
         const char* v = std::getenv("SS_FAST_FIRST_COMPILE");
-        return v == nullptr || v[0] != '0';
+        return v != nullptr && v[0] == '1';
     }();
     return on;
 }
@@ -168,7 +170,7 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
             // ms, 1 in 10 over 0.5 s, 1,537 new ones in a 6-minute session - Second Son has
             // thousands of effect shaders). The one it waits for is built without the driver's
             // optimizations first, quicker to build; the optimized one follows at normal
-            // priority and replaces it once done (SwapInOptimized). SS_FAST_FIRST_COMPILE=0: off.
+            // priority and replaces it once done (SwapInOptimized). SS_FAST_FIRST_COMPILE=1.
             compile_job = compiler->Submit(
                 [this, create] {
                     pipeline = create(vk::PipelineCreateFlagBits::eDisableOptimization);
