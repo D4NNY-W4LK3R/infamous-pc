@@ -897,7 +897,7 @@ TEST(Brain, FrameRateTargetFromAnOlderBuildsOfficeStartsAtLowOneSizeSmaller) {
         const auto path = dir / "knowledge.txt";
         Knowledge k;
         bool sc = false;
-        std::ifstream in{path};
+        std::ifstream in{path, std::ios::binary};
         std::stringstream ss;
         ss << in.rdbuf();
         ASSERT_TRUE(KnowledgeStore::Parse(ss.str(), k, sc));
@@ -905,7 +905,7 @@ TEST(Brain, FrameRateTargetFromAnOlderBuildsOfficeStartsAtLowOneSizeSmaller) {
             p.auto_perf_mode = 2;
             p.auto_render_height = 0;
         }
-        std::ofstream out{path, std::ios::trunc};
+        std::ofstream out{path, std::ios::binary | std::ios::trunc}; // no CRLF on Windows
         out << KnowledgeStore::Serialize(k);
     }
     World w;
