@@ -33,7 +33,18 @@ CONTROLS (keyboard and mouse)
   R / Y                touchpad left / right           Tab     touchpad press
   R + Y together       a thumb on each side (prompts with two fingerprints, e.g. "Move car")
   Z / X  or wheel      swipe the touchpad up / down    V / B   swipe left / right
-                       (arrow prompts such as lifting wreckage)
+                       (arrow prompts such as lifting wreckage). Holding the key keeps the
+                       finger down at the end ("swipe up and hold": Mobile Command cores).
+  Middle mouse button  TOUCHPAD ANYWHERE: hold it and the mouse is a finger on the touchpad,
+  (or back side button) starting in the middle; a small touchpad at the bottom shows it.
+                         click            = press the touchpad (Core Relays)
+                         hold still       = keep it pressed (draining smoke / neon / video)
+                         hold and move    = swipe any way (doors, wreckage), or slide to the
+                                            mark on the D.U.P. hand scanner
+                         move, keep holding = swipe and hold (Mobile Command core: keep
+                                            clicking the left button, it stays R2)
+                         + right button   = a second finger, one on each half ("Move car")
+                       The camera pauses while it is held; the left button still shoots.
   Enter or Esc         pause (Options)                 Arrows  D-pad
   G / H                tilt the controller left / right (spray can)     T  shake
   Delete               mouse = touchpad (fingerprint scanners); press again to go back

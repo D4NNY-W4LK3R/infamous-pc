@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <mutex>
 #include <optional>
 #include <utility>
@@ -35,6 +36,14 @@ struct TouchpadEntry {
     u16 x{};
     u16 y{};
 };
+
+/// What is on the touchpad right now, for the on-screen touchpad (controller 1).
+struct TouchpadSnapshot {
+    bool down[2] = {false, false};
+    float x[2] = {0.5f, 0.5f}, y[2] = {0.5f, 0.5f}; ///< 0..1
+    bool click = false;
+};
+TouchpadSnapshot LastTouchpad();
 
 struct Colour {
     u8 r, g, b;
@@ -121,7 +130,11 @@ public:
     /// a fraction of a second and lifts it, as a swipe on a real touchpad. With two fingers they
     /// go side by side, across the direction of the swipe. A swipe started while another is going
     /// on replaces it.
-    void SwipeTouchpad(float from_x, float from_y, float to_x, float to_y, int fingers = 1);
+    /// With hold, the fingers stay down at the end until ReleaseSwipeHold() (swipe-and-hold
+    /// prompts such as the Mobile Command core); a release before the end lifts them there.
+    void SwipeTouchpad(float from_x, float from_y, float to_x, float to_y, int fingers = 1,
+                       bool hold = false);
+    void ReleaseSwipeHold();
 
     float gyro_buf[3] = {0.0f, 0.0f, 0.0f}, accel_buf[3] = {0.0f, 9.81f, 0.0f};
     s32 user_id = Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID;
@@ -136,6 +149,7 @@ private:
 
     std::mutex m_swipe_mutex;
     std::jthread m_swipe_thread;
+    std::atomic<bool> m_swipe_hold{false};
 
     u8 m_next_touch_id{1};
     u64 m_touch_down_timestamp{};

@@ -141,6 +141,9 @@ constexpr std::string_view GetSecondSonInputConfig() {
     return R"(# inFAMOUS Second Son - PC keyboard and mouse layout (Second Son Adaptive build)
 # Mouse: look around (F7 = capture the mouse on / off), left button = shoot (R2),
 #        right button = aim (L2). - / = = mouse speed. Delete = mouse as touchpad.
+# Touchpad anywhere: hold the middle mouse button (or the back side button) and move the mouse -
+#        a finger on the pad (tap, hold to drain, swipe, slide on the hand scanner); right button
+#        adds a second finger, left button stays R2. Built in, not set here.
 # Motion sensor (global.ini): G / H = tilt left / right, T = shake.
 
 axis_left_x_minus = a
@@ -1133,7 +1136,11 @@ void ControllerOutput::FinalizeUpdate(u8 gamepad_index) {
         case SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE2_RIGHT:
         case SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE2_UP:
         case SDL_GAMEPAD_BUTTON_TOUCHPAD_SWIPE2_DOWN:
-            if (new_button_state) {
+            if (!new_button_state) {
+                // Letting go of the key lifts the finger (it stays at the end while held, for
+                // the "swipe up and hold" prompts such as the Mobile Command core).
+                controller->ReleaseSwipeHold();
+            } else {
                 // Edge to edge, as a thumb does: a short slide in the middle of the pad is
                 // too small for some prompts.
                 static constexpr float Near = 0.08f, Far = 0.92f;
@@ -1141,18 +1148,32 @@ void ControllerOutput::FinalizeUpdate(u8 gamepad_index) {
                 const int index = static_cast<int>(button) - first;
                 const int fingers = index >= 4 ? 2 : 1;
                 static constexpr const char* Dir[4] = {"left", "right", "up", "down"};
+                float px = 0.5f, py = 0.5f;
+                if (TouchModePointer(&px, &py)) {
+                    // Mouse touch mode: the swipe starts under the pointer and runs 0.4 of the
+                    // pad in its direction, so it can start on the mark the game shows.
+                    static constexpr float Len = 0.4f;
+                    static constexpr float Dx[4] = {-Len, Len, 0.0f, 0.0f};
+                    static constexpr float Dy[4] = {0.0f, 0.0f, -Len, Len};
+                    const int d = index % 4;
+                    controller->SwipeTouchpad(px, py, std::clamp(px + Dx[d], 0.0f, 1.0f),
+                                              std::clamp(py + Dy[d], 0.0f, 1.0f), fingers, true);
+                    LOG_INFO(Input, "touchpad swipe {} from the pointer ({:.2f}, {:.2f})", Dir[d],
+                             px, py);
+                    break;
+                }
                 switch (index % 4) {
                 case 0:
-                    controller->SwipeTouchpad(Far, 0.5f, Near, 0.5f, fingers);
+                    controller->SwipeTouchpad(Far, 0.5f, Near, 0.5f, fingers, true);
                     break;
                 case 1:
-                    controller->SwipeTouchpad(Near, 0.5f, Far, 0.5f, fingers);
+                    controller->SwipeTouchpad(Near, 0.5f, Far, 0.5f, fingers, true);
                     break;
                 case 2:
-                    controller->SwipeTouchpad(0.5f, Far, 0.5f, Near, fingers);
+                    controller->SwipeTouchpad(0.5f, Far, 0.5f, Near, fingers, true);
                     break;
                 default:
-                    controller->SwipeTouchpad(0.5f, Near, 0.5f, Far, fingers);
+                    controller->SwipeTouchpad(0.5f, Near, 0.5f, Far, fingers, true);
                     break;
                 }
                 LOG_INFO(Input, "touchpad swipe {} ({} finger{})", Dir[index % 4], fingers,

@@ -52,6 +52,7 @@ set(ADAPTIVE_SOURCES
     ${SRC}/input/camera_hook_signature.cpp
     ${SRC}/core/second_son_patches.cpp
     ${SRC}/common/shared_user_dir.cpp
+    ${SRC}/input/touch_grip.cpp
 )
 
 add_library(adaptive_core STATIC ${ADAPTIVE_SOURCES})
@@ -74,6 +75,7 @@ add_executable(adaptive_tests
     test_settings.cpp
     test_second_son_patches.cpp
     test_shared_user_dir.cpp
+    test_touch_grip.cpp
     test_camera_signature.cpp
 )
 target_link_libraries(adaptive_tests PRIVATE adaptive_core GTest::gtest_main)

@@ -1,14 +1,19 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <mutex>
 
 #include "common/assert.h"
+#include "common/logging/log.h"
 #include "common/types.h"
 #include "core/mouse_aim.h"
 #include "input/controller.h"
 #include "input/input_handler.h"
+#include "input/touch_grip.h"
 #include "input_mouse.h"
 
 #include <common/singleton.h>
@@ -145,14 +150,209 @@ void EmulateGyro(GameController* controller, u32 interval) {
     controller->SetEmulatedRotationRate(gyro_from_mouse);
 }
 
+namespace {
+std::mutex g_touch_view_mutex;
+TouchModeView g_touch_view;
+// What touch mode itself last put on the pad, so it only writes when that changes and leaves
+// the keyboard's touchpad keys (R / Y / Tab) alone otherwise.
+bool g_touch_finger[2] = {false, false};
+bool g_touch_pressed = false;
+bool g_was_touch_mode = false;
+
+void PointerOnPad(float* px, float* py) {
+    float x = 0, y = 0;
+    SDL_GetMouseState(&x, &y);
+    int w = 0, h = 0;
+    SDL_GetWindowSize(g_window->GetSDLWindow(), &w, &h); // same units as the mouse position
+    *px = std::clamp(x / static_cast<float>(std::max(w, 1)), 0.0f, 1.0f);
+    *py = std::clamp(y / static_cast<float>(std::max(h, 1)), 0.0f, 1.0f);
+}
+
+void LiftTouchMode(GameController* controller) {
+    for (int i = 0; i < 2; ++i) {
+        if (g_touch_finger[i]) {
+            controller->SetTouchpadState(i, false, 0.5f, 0.5f);
+            g_touch_finger[i] = false;
+        }
+    }
+    if (g_touch_pressed) {
+        controller->Button(Libraries::Pad::OrbisPadButtonDataOffset::TouchPad, false);
+        g_touch_pressed = false;
+    }
+    std::scoped_lock lk{g_touch_view_mutex};
+    g_touch_view = TouchModeView{};
+}
+} // namespace
+
+TouchModeView GetTouchModeView() {
+    std::scoped_lock lk{g_touch_view_mutex};
+    return g_touch_view;
+}
+
+bool TouchModePointer(float* x, float* y) {
+    if (mouse_mode != MouseMode::Touchpad || g_window == nullptr) {
+        return false;
+    }
+    PointerOnPad(x, y);
+    return true;
+}
+
 void EmulateTouchpad(GameController* controller, u32 interval) {
-    float x, y;
-    SDL_MouseButtonFlags mouse_buttons = SDL_GetMouseState(&x, &y);
-    controller->SetTouchpadState(0, (mouse_buttons & SDL_BUTTON_LMASK) != 0,
-                                 std::clamp(x / g_window->GetWidth(), 0.0f, 1.0f),
-                                 std::clamp(y / g_window->GetHeight(), 0.0f, 1.0f));
-    controller->Button(Libraries::Pad::OrbisPadButtonDataOffset::TouchPad,
-                       (mouse_buttons & SDL_BUTTON_RMASK) != 0);
+    float cx = 0.5f, cy = 0.5f;
+    PointerOnPad(&cx, &cy);
+    const SDL_MouseButtonFlags buttons = SDL_GetMouseState(nullptr, nullptr);
+    const bool left = (buttons & SDL_BUTTON_LMASK) != 0;
+    const bool right = (buttons & SDL_BUTTON_RMASK) != 0;
+    const bool ctrl = (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
+
+    // Left: one finger exactly under the pointer - put it down where the game shows the mark,
+    // move, let go (finger scanners, slides). Right: two thumbs, one on each half of the pad
+    // ("Move car", launching a car): the second mirrors the pointer, at least 0.3 apart.
+    bool want[2] = {left || right, right};
+    float fx[2] = {cx, 1.0f - cx};
+    const float fy[2] = {cy, cy};
+    if (right && std::abs(fx[0] - fx[1]) < 0.3f) {
+        fx[0] = cx <= 0.5f ? 0.35f : 0.65f;
+        fx[1] = 1.0f - fx[0];
+    }
+    for (int i = 0; i < 2; ++i) {
+        if (want[i] || g_touch_finger[i]) {
+            controller->SetTouchpadState(i, want[i], fx[i], fy[i]);
+            g_touch_finger[i] = want[i];
+        }
+    }
+    // Ctrl + a button: the finger also presses the pad down (a real touchpad click).
+    const bool pressed = ctrl && (left || right);
+    if (pressed != g_touch_pressed) {
+        controller->Button(Libraries::Pad::OrbisPadButtonDataOffset::TouchPad, pressed);
+        g_touch_pressed = pressed;
+    }
+
+    std::scoped_lock lk{g_touch_view_mutex};
+    auto& v = g_touch_view;
+    const bool was_down = v.down[0];
+    v.active = true;
+    v.cursor_x = cx;
+    v.cursor_y = cy;
+    for (int i = 0; i < 2; ++i) {
+        v.down[i] = want[i];
+        v.x[i] = fx[i];
+        v.y[i] = fy[i];
+    }
+    v.pressed = pressed;
+    if (want[0]) {
+        if (!was_down) {
+            v.trail_count = 0;
+        }
+        if (v.trail_count == TouchModeView::TrailLength) {
+            std::move(v.trail_x + 1, v.trail_x + TouchModeView::TrailLength, v.trail_x);
+            std::move(v.trail_y + 1, v.trail_y + TouchModeView::TrailLength, v.trail_y);
+            --v.trail_count;
+        }
+        v.trail_x[v.trail_count] = fx[0];
+        v.trail_y[v.trail_count] = fy[0];
+        ++v.trail_count;
+    }
+}
+
+namespace {
+std::mutex g_grip_mutex;
+TouchGrip g_grip{[] {
+    TouchGripConfig c{};
+    // SS_TOUCH_GRIP_PX: mouse pixels for the whole width of the pad (default 600).
+    if (const char* v = std::getenv("SS_TOUCH_GRIP_PX")) {
+        const float px = static_cast<float>(std::atof(v));
+        if (px >= 50.0f && px <= 10000.0f) {
+            c.px_per_pad_width = px;
+        }
+    }
+    return c;
+}()};
+bool g_grip_swallowed[8] = {}; ///< left / right presses that began during a grip
+// What the grip last put on the pad, so it only writes while it owns the touch.
+bool g_grip_finger[2] = {false, false};
+bool g_grip_click = false;
+
+double GripNow() {
+    using namespace std::chrono;
+    return duration<double>(steady_clock::now().time_since_epoch()).count();
+}
+
+bool IsGripButton(u8 b) {
+    return b == SDL_BUTTON_MIDDLE || b == SDL_BUTTON_X1;
+}
+
+void ApplyTouchGrip(GameController* controller) {
+    PadTouch out;
+    {
+        std::scoped_lock lk{g_grip_mutex};
+        out = g_grip.Output(GripNow());
+    }
+    for (int i = 0; i < 2; ++i) {
+        if (out.down[i] || g_grip_finger[i]) {
+            controller->SetTouchpadState(i, out.down[i], out.x[i], out.y[i]);
+            g_grip_finger[i] = out.down[i];
+        }
+    }
+    if (out.click != g_grip_click) {
+        controller->Button(Libraries::Pad::OrbisPadButtonDataOffset::TouchPad, out.click);
+        g_grip_click = out.click;
+    }
+}
+} // namespace
+
+bool TouchGripButton(u8 sdl_button, bool down) {
+    if (mouse_mode == MouseMode::Touchpad || sdl_button >= std::size(g_grip_swallowed)) {
+        return false; // Delete's touch mode has its own use for the buttons
+    }
+    std::scoped_lock lk{g_grip_mutex};
+    if (IsGripButton(sdl_button)) {
+        const double now = GripNow();
+        if (down) {
+            if (!g_grip.Gripping()) {
+                g_grip.Begin(now);
+            }
+        } else if (g_grip.Gripping()) {
+            g_grip.End(now);
+            const auto& g = g_grip.Last();
+            LOG_INFO(Input,
+                     "touch grip: {:.0f} ms, finger moved ({:+.2f}, {:+.2f}) of the pad, {}{}{}",
+                     g.seconds * 1000.0, g.dx, g.dy, g.slid ? "slid" : "held in place",
+                     g.two_fingers ? ", two fingers" : "",
+                     g.pressed_at_end ? ", pad pressed at the end" : "");
+        }
+        return true;
+    }
+    // The left button stays R2 during a grip: the Mobile Command core is held up on the pad
+    // while R2 is pressed again and again.
+    if (sdl_button != SDL_BUTTON_RIGHT) {
+        return false;
+    }
+    if (down && g_grip.Gripping()) {
+        g_grip_swallowed[sdl_button] = true;
+        g_grip.SetSecondFinger(true);
+        return true;
+    }
+    if (!down && g_grip_swallowed[sdl_button]) {
+        g_grip_swallowed[sdl_button] = false;
+        g_grip.SetSecondFinger(false);
+        return true; // the press never reached the bindings, so neither does the release
+    }
+    return false;
+}
+
+bool TouchGripMotion(float xrel, float yrel) {
+    std::scoped_lock lk{g_grip_mutex};
+    if (!g_grip.Gripping()) {
+        return false;
+    }
+    g_grip.Move(xrel, yrel);
+    return true;
+}
+
+bool TouchGripActive() {
+    std::scoped_lock lk{g_grip_mutex};
+    return g_grip.Gripping();
 }
 
 static bool TouchpadBlockFix() {
@@ -166,7 +366,9 @@ static bool TouchpadBlockFix() {
 bool MouseEventsBelongToPad() {
     // A click meant for the pad can land on an overlay window (the FPS counter) and start an
     // ImGui window drag that swallows the keyboard while the button is held.
-    return TouchpadBlockFix() && mouse_mode != MouseMode::Off;
+    // Touch mode: the pointer is visible and moves over the FPS counter and other overlays, so
+    // its clicks always belong to the pad there.
+    return mouse_mode == MouseMode::Touchpad || (TouchpadBlockFix() && mouse_mode != MouseMode::Off);
 }
 
 void ApplyMouseInputBlockers() {
@@ -212,6 +414,15 @@ Uint32 MousePolling(void* param, Uint32 id, Uint32 interval) {
         }
         g_motion_from_mouse = false;
     }
+    if (g_was_touch_mode && mouse_mode != MouseMode::Touchpad) {
+        LiftTouchMode(controller); // leaving touch mode with a finger down lifts it
+    }
+    g_was_touch_mode = mouse_mode == MouseMode::Touchpad;
+    if (TouchGripActive()) {
+        // The grip has the mouse: its motion is the finger, not the stick or the motion sensor.
+        SDL_GetRelativeMouseState(nullptr, nullptr);
+    }
+    ApplyTouchGrip(controller);
     switch (mouse_mode) {
     case MouseMode::Joystick:
         EmulateJoystick(controller, interval);

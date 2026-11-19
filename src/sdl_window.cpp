@@ -342,13 +342,40 @@ void WindowSDL::WaitEvent() {
         OnResize();
         break;
     case SDL_EVENT_MOUSE_MOTION:
+        if (Input::TouchGripMotion(event.motion.xrel, event.motion.yrel)) {
+            break; // the grip has the mouse: it moves the finger, not the camera
+        }
         if (Input::MouseAimActive()) {
             // Native mouse camera: every pixel goes straight to the camera's pan / tilt.
             Core::MouseAim::OnMouseMotion(event.motion.xrel, event.motion.yrel);
         }
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
-    case SDL_EVENT_MOUSE_BUTTON_UP:
+    case SDL_EVENT_MOUSE_BUTTON_UP: {
+        // Touch grip: the middle / back button holds a finger on the touchpad; the left and
+        // right buttons pressed during it press the pad / add a second finger.
+        const bool dialog = ImGuiEmuSettings::IsInGameSettingsDialogOpen() ||
+                            Adaptive::Glue::OverlayVisible();
+        if ((!dialog || Input::TouchGripActive()) &&
+            Input::TouchGripButton(event.button.button,
+                                   event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)) {
+            // While gripping the pointer is captured, so the finger never stops at the edge of
+            // the screen; afterwards the mouse goes back to how it was.
+            static bool restore_relative = false;
+            static bool grip_was = false;
+            const bool grip_now = Input::TouchGripActive();
+            if (grip_now && !grip_was) {
+                restore_relative = SDL_GetWindowRelativeMouseMode(window);
+                SDL_SetWindowRelativeMouseMode(window, true);
+            } else if (!grip_now && grip_was) {
+                SDL_SetWindowRelativeMouseMode(window, restore_relative);
+            }
+            grip_was = grip_now;
+            break;
+        }
+        OnKeyboardMouseInput(&event);
+        break;
+    }
     case SDL_EVENT_MOUSE_WHEEL:
     case SDL_EVENT_MOUSE_WHEEL_OFF:
         OnKeyboardMouseInput(&event);

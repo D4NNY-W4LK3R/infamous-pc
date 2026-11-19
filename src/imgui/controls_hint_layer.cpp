@@ -91,7 +91,10 @@ public:
             if (const char* m = MouseState()) {
                 ImGui::TextDisabled("%s", m);
             }
+            ImGui::TextDisabled("Touchpad with the mouse: hold the middle button and move");
+            ImGui::TextDisabled("  (click = press, hold = drain, + right button = two fingers)");
             ImGui::TextDisabled("Two fingerprints on screen: hold R + Y (both touchpad sides)");
+            ImGui::TextDisabled("Swipe keys Z X V B / wheel: hold the key to keep the finger down");
             ImGui::TextDisabled("Home hides this | F1 optimizer | F7 mouse | Del touchpad");
             ImGui::SetWindowFontScale(1.0f);
         }

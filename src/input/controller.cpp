@@ -132,7 +132,21 @@ int GameController::ReadStates(State* states, int states_num) {
     return read_count;
 }
 
+namespace {
+std::mutex g_touch_snapshot_mutex;
+TouchpadSnapshot g_touch_snapshot;
+} // namespace
+
+TouchpadSnapshot LastTouchpad() {
+    std::scoped_lock lk{g_touch_snapshot_mutex};
+    return g_touch_snapshot;
+}
+
 void GameController::Button(OrbisPadButtonDataOffset button, bool is_pressed) {
+    if (button == OrbisPadButtonDataOffset::TouchPad) {
+        std::scoped_lock lk{g_touch_snapshot_mutex};
+        g_touch_snapshot.click = is_pressed;
+    }
     std::lock_guard lock{m_state_mutex};
     m_state.OnButton(button, is_pressed);
     PushStateLocked();
@@ -191,6 +205,12 @@ void GameController::SetTouchpadState(int touch_index, bool touch_down, float x,
     if (touch_index < 0 || touch_index >= 2) {
         return;
     }
+    {
+        std::scoped_lock lk{g_touch_snapshot_mutex};
+        g_touch_snapshot.down[touch_index] = touch_down;
+        g_touch_snapshot.x[touch_index] = std::clamp(x, 0.0f, 1.0f);
+        g_touch_snapshot.y[touch_index] = std::clamp(y, 0.0f, 1.0f);
+    }
 
     std::lock_guard lock{m_state_mutex};
     const u64 timestamp = Libraries::Kernel::sceKernelGetProcessTime();
@@ -210,8 +230,12 @@ void GameController::SetTouchpadState(int touch_index, bool touch_down, float x,
     PushStateLocked(timestamp);
 }
 
+void GameController::ReleaseSwipeHold() {
+    m_swipe_hold.store(false);
+}
+
 void GameController::SwipeTouchpad(float from_x, float from_y, float to_x, float to_y,
-                                   int fingers) {
+                                   int fingers, bool hold) {
     // Games read the touchpad every frame, so the finger has to move for a few of them to see
     // a swipe rather than a tap: about 300 ms in steps short enough to land in each frame, so a
     // game running at 30 fps still sees the finger in about nine places along the way.
@@ -225,6 +249,8 @@ void GameController::SwipeTouchpad(float from_x, float from_y, float to_x, float
     const float offset_y = horizontal ? spread : 0.0f;
     std::lock_guard lock{m_swipe_mutex};
     // Replacing the thread asks the one going on to stop, which lifts its fingers, and waits.
+    m_swipe_thread = {};
+    m_swipe_hold.store(hold);
     m_swipe_thread = std::jthread([=, this](std::stop_token token) {
         const auto place = [&](bool down, float x, float y) {
             SetTouchpadState(0, down, x - offset_x, y - offset_y);
@@ -237,6 +263,10 @@ void GameController::SwipeTouchpad(float from_x, float from_y, float to_x, float
             std::this_thread::sleep_for(StepTime);
             const float t = static_cast<float>(step) / Steps;
             place(true, from_x + (to_x - from_x) * t, from_y + (to_y - from_y) * t);
+        }
+        // Swipe and hold: the finger stays at the end while the key is held.
+        while (m_swipe_hold.load() && !token.stop_requested()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{10});
         }
         place(false, to_x, to_y);
     });

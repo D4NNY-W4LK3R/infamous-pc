@@ -1258,6 +1258,8 @@ set(INPUT src/input/controller.cpp
           src/input/input_handler.h
           src/input/input_mouse.cpp
           src/input/input_mouse.h
+          src/input/touch_grip.cpp
+          src/input/touch_grip.h
           src/input/camera_hook_signature.cpp
           src/input/camera_hook_signature.h
 )
@@ -1292,6 +1294,8 @@ set(ADAPTIVE src/adaptive/adaptive_overlay.cpp
              src/imgui/controls_hint_layer.h
              src/imgui/notice_layer.cpp
              src/imgui/notice_layer.h
+             src/imgui/touchpad_layer.cpp
+             src/imgui/touchpad_layer.h
 )
 
 set(EMULATOR src/emulator.cpp
