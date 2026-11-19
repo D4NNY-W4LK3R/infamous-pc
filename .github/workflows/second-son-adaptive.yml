@@ -85,6 +85,18 @@ jobs:
             "CFLAGS=/D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           }
 
+      - name: Patch OpenAL for the newer MSVC library
+        shell: bash
+        run: |
+          # MSVC 14.52 (runner image 20261116) can no longer take unique_ptr::operator* by address:
+          # alc.cpp's views::transform(&EffectSlotCluster::operator*) fails to compile. A lambda
+          # does the same; skipped if the line is not there (a fixed OpenAL).
+          f=externals/openal-soft/alc/alc.cpp
+          if grep -q 'std::views::transform(&ContextBase::EffectSlotCluster::operator\*)' "$f"; then
+            sed -i 's/std::views::transform(&ContextBase::EffectSlotCluster::operator\*)/std::views::transform([](ContextBase::EffectSlotCluster const \&c) -> auto\& { return *c; })/' "$f"
+            grep -n 'EffectSlotCluster const &c' "$f"
+          fi
+
       - name: Configure
         run: cmake --fresh -G Ninja -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE=ON -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_EXE_LINKER_FLAGS=/MAP
 
