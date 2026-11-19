@@ -19,12 +19,12 @@
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "core/mouse_aim.h"
+#include "core/mouse_aim_cave.h"
 #include "input/camera_hook_signature.h"
 
 #if defined(ARCH_X86_64) && defined(_WIN32)
 #define MOUSE_AIM_SUPPORTED 1
 #include <windows.h>
-#include <xbyak/xbyak.h>
 #include "core/cpu_patches.h"
 #endif
 
@@ -32,13 +32,7 @@ namespace Core::MouseAim {
 
 namespace {
 
-// Shared with the cave (trampoline area, 64-byte aligned).
-struct Mailbox {
-    u64 delta;  ///< +0: f32 yaw, f32 pitch (radians); the cave swaps it with 0 every camera update
-    float pan;  ///< +8: the stored pan after the cave (read-out)
-    float tilt; ///< +12: the stored tilt
-    u32 frames; ///< +16: camera updates seen by the cave
-};
+
 
 std::atomic<Mailbox*> g_mailbox{nullptr}; ///< published last (release), after everything below
 const volatile u8* g_invert_x = nullptr;
@@ -73,6 +67,15 @@ std::atomic<bool> g_live{false};
 /// movement so the game's own follow comes back.
 volatile u8* g_no_follow = nullptr;
 std::atomic<s64> g_last_motion_ns{0};
+/// Tilt hold: on ledges and rooftop edges the game pulls the camera's tilt back to level every
+/// update unless the right stick is held (player report, build 25: aiming up at drones from a
+/// rooftop keeps snapping back; on flat ground the tilt stays). For as long as the follow byte
+/// is held after the last mouse movement, the cave keeps the tilt it stored last instead of the
+/// game's new one; the pan stays the game's. SHADPS4_MOUSE_AIM_TILT_HOLD=0 turns it off.
+const bool g_tilt_hold = [] {
+    const char* v = std::getenv("SHADPS4_MOUSE_AIM_TILT_HOLD");
+    return v == nullptr || v[0] != '0';
+}();
 std::mutex g_status_mutex;
 std::string g_status = "not checked yet (the game has not started)";
 
@@ -94,50 +97,7 @@ std::optional<bool> IniEnabled() {
 }
 constexpr auto StaleAfter = std::chrono::milliseconds(250);
 
-#ifdef MOUSE_AIM_SUPPORTED
-// The cave, at the camera's pan / tilt store. Registers (from the disassembly; Opus review
-// 2026-10-17): xmm0 = (pan, tilt, 0, 0) to store, xmm1 = the turn speeds stored next (kept),
-// r13 = camera, r12 = camera data, [rsp+0x50] = the context whose +0x1c0 pair limits the tilt
-// with the data's +0x1c0 pair (FUN_80014a810). rax, r11, xmm2-xmm5 and the flags are dead here
-// (the call at 14ebfa is an import stub): the cave needs no stack (no red-zone hazard).
-class CameraCave : public Xbyak::CodeGenerator {
-public:
-    CameraCave(u8* code, size_t size, Mailbox* mailbox, const void* return_to, bool clamp_tilt)
-        : Xbyak::CodeGenerator(size, code) {
-        Xbyak::Label store;
-        mov(rax, reinterpret_cast<u64>(mailbox));
-        xor_(r11d, r11d);
-        xchg(r11, qword[rax + offsetof(Mailbox, delta)]); // take the mouse motion, leave 0
-        test(r11, r11);
-        jz(store, T_NEAR); // no motion: exactly the game's own store
-        vmovq(xmm2, r11);
-        vaddps(xmm3, xmm0, xmm2); // (pan + yaw, tilt + pitch)
-        if (!clamp_tilt) {
-            vmovaps(xmm0, xmm3);
-            jmp(store, T_NEAR);
-        }
-        // Tilt limits: lower = max(data.x, ctx.x), upper = min(data.y, ctx.y). The mouse may not
-        // push past them; a tilt already outside (the game's own doing) is not pulled in.
-        mov(r11, qword[rsp + 0x50]);
-        vmovsd(xmm4, qword[r12 + 0x1c0]);
-        vmovsd(xmm2, qword[r11 + 0x1c0]);
-        vmaxps(xmm5, xmm4, xmm2);
-        vminps(xmm4, xmm4, xmm2);
-        vpermilps(xmm5, xmm5, 0x00); // lower in every lane
-        vpermilps(xmm4, xmm4, 0x55); // upper in every lane
-        vminps(xmm5, xmm5, xmm0);    // lo = min(lower, current)
-        vmaxps(xmm4, xmm4, xmm0);    // hi = max(upper, current)
-        vminps(xmm2, xmm4, xmm3);
-        vmaxps(xmm2, xmm2, xmm5);        // clamp(candidate, lo, hi)
-        vblendps(xmm0, xmm3, xmm2, 0x2); // pan from the candidate, tilt clamped
-        L(store);
-        vmovq(qword[rax + offsetof(Mailbox, pan)], xmm0);
-        inc(dword[rax + offsetof(Mailbox, frames)]);
-        vmovups(xword[r13 + 0x330], xmm0); // the original instruction
-        jmp(return_to, T_NEAR);
-    }
-};
-#endif
+
 
 } // namespace
 
@@ -232,7 +192,7 @@ void InstallCameraHook(VAddr eboot_base, u64 eboot_size) {
         }
     }
 
-    constexpr size_t CaveSize = 192;
+    constexpr size_t CaveSize = 256;
     u8* const block = AllocateTrampolineSpace(site, 64 + CaveSize);
     if (block == nullptr) {
         LOG_WARNING(Core, "Mouse aim: no trampoline space - off");
@@ -284,9 +244,9 @@ void InstallCameraHook(VAddr eboot_base, u64 eboot_size) {
     SetStatus(std::string("installed - ") + build.name);
     LOG_INFO(Core,
              "Mouse aim: camera hook at {:#x} -> cave {} ({} bytes), mailbox {}, {:.1f} deg per "
-             "100 px, signs x {} y {}, tilt clamp {}, follow byte {}",
+             "100 px, signs x {} y {}, tilt clamp {}, tilt hold {}, follow byte {}",
              eboot_base + StoreOffset, fmt::ptr(cave_code), cave_size, fmt::ptr(mailbox),
-             g_sens_deg.load(), g_sign_x, g_sign_y, clamp_tilt,
+             g_sens_deg.load(), g_sign_x, g_sign_y, clamp_tilt, g_tilt_hold,
              fmt::ptr(const_cast<u8*>(g_no_follow)));
 #else
     (void)eboot_base;
@@ -326,17 +286,21 @@ void Tick() {
         const double s = v ? std::atof(v) : 5.0;
         return static_cast<s64>(std::clamp(s, 0.0, 100000.0) * 1e9);
     }();
+    const s64 now_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+    const s64 last = g_last_motion_ns.load(std::memory_order_relaxed);
+    const bool recent = hold_ns > 0 && last != 0 && now_ns - last < hold_ns;
     if (g_no_follow != nullptr && hold_ns > 0) {
-        const s64 now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                               now.time_since_epoch())
-                               .count();
-        const s64 last = g_last_motion_ns.load(std::memory_order_relaxed);
-        const u8 want = last != 0 && now_ns - last < hold_ns ? 1 : 0;
+        const u8 want = recent ? 1 : 0;
         static u8 written = 0;
         if (want != written) { // only on changes: the game itself never writes it (measured)
             *g_no_follow = want;
             written = want;
         }
+    }
+    if (!recent || !live) {
+        // The game's tilt is back in charge (OnMouseMotion turns the hold on again).
+        std::atomic_ref<u32>{mb->hold}.store(0, std::memory_order_relaxed);
     }
     if (live != g_live.load(std::memory_order_relaxed)) {
         g_live.store(live, std::memory_order_relaxed);
@@ -368,6 +332,10 @@ void OnMouseMotion(float xrel, float yrel) {
     }
     if (*g_invert_y != 0) {
         pitch = -pitch;
+    }
+    if (g_tilt_hold && pitch != 0.0f) {
+        // Only tilting with the mouse holds the tilt: turning sideways leaves the game's tilt.
+        std::atomic_ref<u32>{mb->hold}.store(1, std::memory_order_relaxed);
     }
     std::atomic_ref<u64> delta{mb->delta};
     u64 old = delta.load(std::memory_order_relaxed);

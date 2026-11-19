@@ -962,6 +962,7 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/second_son_patches.cpp
          src/core/second_son_patches.h
          src/core/mouse_aim.cpp
+         src/core/mouse_aim_cave.h
          src/core/mouse_aim.h
          src/core/linker.h
          src/core/memory.cpp

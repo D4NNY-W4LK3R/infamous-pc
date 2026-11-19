@@ -77,7 +77,10 @@ add_executable(adaptive_tests
     test_shared_user_dir.cpp
     test_touch_grip.cpp
     test_camera_signature.cpp
+    test_camera_cave.cpp
 )
+# The camera code cave is generated with Xbyak and run by test_camera_cave on x86-64.
+target_include_directories(adaptive_tests PRIVATE ${SRC}/../externals/xbyak)
 target_link_libraries(adaptive_tests PRIVATE adaptive_core GTest::gtest_main)
 
 if (ADAPTIVE_SANITIZE AND NOT MSVC)

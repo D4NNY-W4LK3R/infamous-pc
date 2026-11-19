@@ -26,6 +26,9 @@ CONTROLS (keyboard and mouse)
                        not running (spray painting, menus, special scenes) the mouse drives the
                        right stick AND the motion sensor, so the spray can's pointer follows it.
                        F7 captures / releases the mouse.
+                       Where you aim up or down stays put for 5 s after you last moved
+                       the mouse, also on ledges and rooftop edges where the game pulls
+                       the camera back to level (SHADPS4_MOUSE_AIM_TILT_HOLD=0: off).
   Left / right button  shoot (R2) / aim (L2)          - and =   mouse speed down / up
   W A S D              move          Space  jump (X)        Left Shift  dash (O)
   C                    melee (Square)                 F       Karmic / interact (Triangle)
