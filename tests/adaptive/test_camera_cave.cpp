@@ -74,6 +74,10 @@ public:
         cave = std::make_unique<CameraCave>(cave_at, 1024, &mailbox, back.getAddress(), clamp);
     }
 
+    // Generated code has no type signature in front of it for clang's -fsanitize=function.
+#if defined(__clang__)
+    __attribute__((no_sanitize("function")))
+#endif
     void Run(Regs& r) {
         getCode<void (*)(Regs*)>()(&r);
     }

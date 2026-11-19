@@ -32,6 +32,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ ! -f tests/adaptive/CMakeLists.txt ]; then echo "no adaptive tests on this commit"; exit 0; fi
+          # The camera code-cave test generates and runs x86-64 code with Xbyak.
+          git submodule update --init --depth 1 externals/xbyak
           git clone -q --depth 1 --branch v1.17.0 https://github.com/google/googletest.git /tmp/gtest
           for cc in "gcc g++" "clang clang++"; do
             set -- $cc
