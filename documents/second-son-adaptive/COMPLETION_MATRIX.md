@@ -5,6 +5,8 @@ Status as of 2026-11-19, after the player's runs of builds 10–23. **Implemente
 game files. **Blocked** = cannot proceed without something missing. No benchmark or gameplay
 result below was measured on the target laptop beyond what the session reports show; none is claimed.
 
+**Player-verified on the target PC (2026-11-20):** P spray can hold for stencil art (row 27), mouse aim no longer pulled level on ledges (camera tilt hold), and "No" on "save before loading?" (row 26) all work.
+
 | # | Requirement | Implemented | Tested (evidence) | Unverified on target PC | Blocked |
 |---|---|---|---|---|---|
 | 1 | Pinned base infamous-pc v1.1.0 `2c599e0`, 4 GB renderer preserved | yes: only additive hooks in render code, defaults unchanged | unmodified v1.1.0 built on Windows CI (run for `122b8a84`, release `ssa-…-1`); patched tree reproduced from pinned commit + patches, tree hash checked | runs like plain infamous-pc on GTX 1650 (checklist A) | – |
