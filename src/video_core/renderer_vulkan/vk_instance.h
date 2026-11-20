@@ -479,6 +479,20 @@ public:
     /// Current VK_EXT_memory_budget heap budget of the heaps in use (0 when not supported).
     [[nodiscard]] u64 GetDeviceMemoryBudget() const;
 
+    /// One memory heap as VK_EXT_memory_budget reports it now, for the VRAM monitor.
+    struct HeapUsage {
+        u64 size;
+        u64 usage;
+        u64 budget;
+        bool device_local;
+    };
+    [[nodiscard]] std::vector<HeapUsage> GetHeapUsage() const;
+
+    /// Memory priorities can be given and changed (VK_EXT_pageable_device_local_memory).
+    bool IsPageableDeviceLocalMemorySupported() const {
+        return pageable_device_local_memory;
+    }
+
     /// Returns the total memory budget available to the device.
     [[nodiscard]] u64 GetTotalMemoryBudget() const {
         return total_memory_budget;

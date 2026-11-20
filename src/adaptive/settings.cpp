@@ -122,6 +122,13 @@ UserSettings ParseSettings(const std::string& text) {
             }
             (key == "render_height" ? s.render_height : s.auto_render_min) =
                 NormalizeRenderHeight(v);
+        } else if (key == "vram_priorities") {
+            const auto b = ParseBool(value);
+            if (!b) {
+                s.warnings.push_back(key + " '" + value + "' is not 0/1");
+                continue;
+            }
+            s.vram_priorities = *b;
         } else if (key == "particle_late_read" || key == "particle_light_one_submit") {
             const auto b = ParseBool(value);
             if (!b) {
@@ -165,6 +172,9 @@ std::string SerializeSettings(const UserSettings& s) {
     o << "perf_mode = " << (s.perf_mode == 1 ? "low" : s.perf_mode == 2 ? "office" : "off") << '\n';
     o << "particle_late_read = " << (s.particle_late_read ? 1 : 0) << '\n';
     o << "particle_light_one_submit = " << (s.particle_light_one_submit ? 1 : 0) << '\n';
+    o << "# memory priorities for the driver on a card short of video memory: buffers highest,\n"
+         "# images drawn to next, textures last (F3 settings > Graphics; next launch)\n";
+    o << "vram_priorities = " << (s.vram_priorities ? 1 : 0) << '\n';
     o << "# frame-rate target: the optimizer picks the performance mode per launch, from\n"
          "# perf_mode (your choice) down to auto_perf_max (off | low | office); 0 = off\n";
     o << "fps_target = " << s.fps_target << '\n';
@@ -199,6 +209,11 @@ UserSettings LoadSettings(const std::filesystem::path& file,
             s.perf_mode = parsed.perf_mode;
         } else {
             s.warnings.push_back("SHADPS4_PERF_MODE '" + *v + "' must be off, low or office");
+        }
+    }
+    if (const auto v = env("SS_VRAM_PRIORITIES")) {
+        if (const auto b = ParseBool(*v)) {
+            s.vram_priorities = *b;
         }
     }
     if (const auto v = env("SHADPS4_PARTICLE_LATE_READ")) {

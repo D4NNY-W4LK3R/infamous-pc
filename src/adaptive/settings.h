@@ -20,6 +20,8 @@
 //   fps_target = 0         the optimizer lowers the game's quality level (per launch) to reach
 //                          this frame rate; 0 = off
 //   auto_perf_max = off    the lowest quality it may use: off (none) | low | office
+//   vram_priorities = 0    memory priorities for the driver: buffers highest, images drawn to
+//                          next, textures last (next launch; SS_VRAM_PRIORITIES)
 //
 // Environment variables win over the file (SS_ADAPTIVE_MODE, SS_ADAPTIVE=0). The overlay writes
 // the file back when the user changes the mode, so the choice is remembered.
@@ -55,6 +57,9 @@ struct UserSettings {
     std::uint32_t render_height = 1080;
     /// The smallest render size the frame-rate target may use (1080 = it never changes the size).
     std::uint32_t auto_render_min = 1080;
+    /// VRAM priorities (build 41, next launch): buffers' memory highest, images drawn to higher
+    /// than textures, so the driver moves textures out first on a card short of memory.
+    bool vram_priorities = false;
     std::vector<std::string> warnings; ///< unknown keys, bad values (not fatal)
 };
 

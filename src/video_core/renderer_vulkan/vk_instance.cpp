@@ -863,6 +863,23 @@ u64 Instance::GetDeviceMemoryUsage() const {
     return total_usage;
 }
 
+std::vector<Instance::HeapUsage> Instance::GetHeapUsage() const {
+    vk::PhysicalDeviceMemoryBudgetPropertiesEXT budget_props{};
+    vk::PhysicalDeviceMemoryProperties2 props = {
+        .pNext = supports_memory_budget ? &budget_props : nullptr,
+    };
+    physical_device.getMemoryProperties2(&props);
+    std::vector<HeapUsage> heaps;
+    const auto& mem = props.memoryProperties;
+    for (u32 i = 0; i < mem.memoryHeapCount; ++i) {
+        heaps.push_back({mem.memoryHeaps[i].size, budget_props.heapUsage[i],
+                         budget_props.heapBudget[i],
+                         (mem.memoryHeaps[i].flags & vk::MemoryHeapFlagBits::eDeviceLocal) !=
+                             vk::MemoryHeapFlags{}});
+    }
+    return heaps;
+}
+
 u64 Instance::GetDeviceMemoryBudget() const {
     if (!supports_memory_budget) {
         return 0;

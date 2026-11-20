@@ -170,7 +170,12 @@ TROUBLESHOOTING
   work beside the drawing, as the PS4 does (next launch). A launch with it on that does not end
   cleanly turns it off again by itself. Measured on a GTX 1650 (build 39, 16 minutes each):
   worse - 23.1 against 26.3 fps in gameplay, 954 freezes against 10, two minutes at 3 fps -
-  so leave it off on such a card. Build 38 also samples the game's main thread while the
+  so leave it off on such a card.
+  Build 41: the log gets a "VRAM:" line every 30 s - what the emulator holds in video memory,
+  how much of this process Windows keeps in shared system memory, and how busy the card's 3D,
+  copy and compute engines were (the copy engine is what Windows moves memory with).
+  Experimental, build 41: F3 > Graphics > "VRAM Priorities" tells the driver to keep buffers
+  and images drawn to in video memory first and move textures out first (next launch). Build 38 also samples the game's main thread while the
   spray can is out (stencil probe, SS_STENCIL_PROBE=0: off), to find how to tell stencil art
   from other graffiti without P.
   Back to the plain 4 GB behaviour for one run: set SS_ADAPTIVE=0 and SHADPS4_MOUSE_AIM=0

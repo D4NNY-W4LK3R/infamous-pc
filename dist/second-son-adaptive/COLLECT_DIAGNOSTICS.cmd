@@ -30,6 +30,8 @@ if exist "SHA256.txt" copy /y "SHA256.txt" "%D%\" >nul
 if exist "SOURCE_PINS.txt" copy /y "SOURCE_PINS.txt" "%D%\" >nul
 if exist "BUILD.txt" copy /y "BUILD.txt" "%D%\" >nul
 systeminfo > "%D%\systeminfo.txt" 2>nul
+rem Hardware-accelerated GPU scheduling (HwSchMode 2 = on, 1 = off; missing = off).
+reg query "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" /v HwSchMode > "%D%\gpu_scheduling.txt" 2>&1
 powershell -NoProfile -Command "Get-CimInstance Win32_VideoController | Select-Object Name,DriverVersion,AdapterRAM | Format-List | Out-File -Encoding utf8 '%D%\gpu.txt'; Get-PSDrive -PSProvider FileSystem | Select-Object Name,@{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}} | Format-Table | Out-File -Encoding utf8 '%D%\drives.txt'"
 if exist "%Z%" del /q "%Z%"
 powershell -NoProfile -Command "Compress-Archive -Path '%D%\*' -DestinationPath '%~dp0%Z%' -Force"

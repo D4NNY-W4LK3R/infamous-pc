@@ -100,3 +100,20 @@ TEST(Settings, FrameRateTargetOptions) {
     EXPECT_EQ(back.fps_target, 45u);
     EXPECT_EQ(back.auto_perf_max, 1u);
 }
+
+TEST(Settings, VramPrioritiesOffByDefaultRoundTripAndEnvironment) {
+    EXPECT_FALSE(ParseSettings("").vram_priorities);
+    const auto on = ParseSettings("vram_priorities = 1\n");
+    EXPECT_TRUE(on.vram_priorities);
+    EXPECT_TRUE(on.warnings.empty());
+    EXPECT_TRUE(ParseSettings(SerializeSettings(on)).vram_priorities);
+    EXPECT_FALSE(ParseSettings("vram_priorities = maybe\n").warnings.empty());
+    const auto dir = std::filesystem::temp_directory_path() / "ssa_vram_priorities";
+    std::filesystem::create_directories(dir);
+    const auto file = dir / "settings.ini";
+    ASSERT_TRUE(SaveSettings(file, UserSettings{}));
+    const auto loaded = LoadSettings(file, [](const std::string& k) -> std::optional<std::string> {
+        return k == "SS_VRAM_PRIORITIES" ? std::optional<std::string>{"1"} : std::nullopt;
+    });
+    EXPECT_TRUE(loaded.vram_priorities);
+}

@@ -20,6 +20,8 @@
 #include "video_core/texture_cache/host_compatibility.h"
 #include "adaptive/emulator_glue.h"
 #include "video_core/texture_cache/texture_cache.h"
+#include <vk_mem_alloc.h>
+#include "video_core/vram_monitor.h"
 #include "video_core/texture_cache/tile_manager.h"
 
 namespace VideoCore {
@@ -671,6 +673,23 @@ ImageView& TextureCache::FindTexture(ImageId image_id, BindingType type,
     return image.FindView(view_info);
 }
 
+void TextureCache::RaisePriority(Image& image) {
+    // VRAM priorities (F3): the memory block of an image drawn to is raised once, above the
+    // textures the driver should move out first and below the buffers. Images share blocks, so
+    // the textures in it come along.
+    if (!VideoCore::VramMonitor::PrioritiesOn(instance) || !image.backing ||
+        !image.backing->image.allocation) {
+        return;
+    }
+    VmaAllocationInfo info{};
+    vmaGetAllocationInfo(image.backing->image.allocator, image.backing->image.allocation, &info);
+    if (info.deviceMemory == VK_NULL_HANDLE || !raised_blocks.insert(info.deviceMemory).second) {
+        return;
+    }
+    instance.GetDevice().setMemoryPriorityEXT(vk::DeviceMemory{info.deviceMemory}, 0.75f);
+    VideoCore::VramMonitor::raised_image_blocks.store(static_cast<u32>(raised_blocks.size()));
+}
+
 ImageView& TextureCache::FindRenderTarget(ImageId image_id, const ImageDesc& desc) {
     Image& image = slot_images[image_id];
     image.flags |= ImageFlagBits::GpuModified;
@@ -678,7 +697,11 @@ ImageView& TextureCache::FindRenderTarget(ImageId image_id, const ImageDesc& des
         std::unique_lock lk{download_images_mutex};
         download_images.emplace(image_id);
     }
+    const bool first_render_target = !image.usage.render_target;
     image.usage.render_target = 1u;
+    if (first_render_target) {
+        RaisePriority(image);
+    }
     UpdateImage(image_id);
 
     // Register meta data for this color buffer
@@ -700,7 +723,11 @@ ImageView& TextureCache::FindRenderTarget(ImageId image_id, const ImageDesc& des
 ImageView& TextureCache::FindDepthTarget(ImageId image_id, const ImageDesc& desc) {
     Image& image = slot_images[image_id];
     image.flags |= ImageFlagBits::GpuModified;
+    const bool first_depth_target = !image.usage.depth_target;
     image.usage.depth_target = 1u;
+    if (first_depth_target) {
+        RaisePriority(image);
+    }
     UpdateImage(image_id);
 
     // Register meta data for this depth buffer
@@ -867,6 +894,8 @@ void TextureCache::RegisterImage(ImageId image_id) {
     image.flags |= ImageFlagBits::Registered;
     ++image_generation;
     total_used_memory += Common::AlignUp(image.info.guest_size, 1024);
+    VideoCore::VramMonitor::image_bytes.fetch_add(Common::AlignUp(image.info.guest_size, 1024));
+    VideoCore::VramMonitor::image_count.fetch_add(1);
     image_lru_cache.Insert(image, gc_tick);
     const auto& info = image.info;
     ASSERT_MSG((info.guest_address & 0xff) == 0, "Trying to register an unaligned image");
@@ -887,6 +916,8 @@ void TextureCache::UnregisterImage(ImageId image_id) {
     ++image_generation;
     image_lru_cache.Free(image);
     total_used_memory -= Common::AlignUp(image.info.guest_size, 1024);
+    VideoCore::VramMonitor::image_bytes.fetch_sub(Common::AlignUp(image.info.guest_size, 1024));
+    VideoCore::VramMonitor::image_count.fetch_sub(1);
     ForEachPage(image.info.guest_address, image.info.guest_size, [this, image_id](u64 page) {
         const auto page_it = page_table.find(page);
         ASSERT_MSG(page_it, "Unregistering unregistered page={:#x}", page << Traits::PAGE_BITS);

@@ -18,6 +18,7 @@
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/buffer_cache.h"
+#include "video_core/vram_monitor.h"
 #include "video_core/buffer_cache/memory_tracker.h"
 #include "video_core/buffer_cache/region_definitions.h"
 #include "video_core/page_manager.h"
@@ -1248,7 +1249,10 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
 
 std::pair<vk::DeviceMemory, u64> BufferCache::AllocateResidency(u64 size) {
     const auto try_allocate = [this](u64 allocation_size) {
+        // VRAM priorities (F3): the buffers' memory is the last the driver should move out.
+        const vk::MemoryPriorityAllocateInfoEXT priority{.priority = 1.0f};
         const vk::MemoryAllocateInfo alloc_info = {
+            .pNext = VideoCore::VramMonitor::PrioritiesOn(instance) ? &priority : nullptr,
             .allocationSize = allocation_size,
             .memoryTypeIndex = arena_memory_type_index,
         };
@@ -1281,6 +1285,7 @@ std::pair<vk::DeviceMemory, u64> BufferCache::AllocateResidency(u64 size) {
         }
         const auto memory = Vulkan::Check(std::move(result));
         residency_allocated_bytes += allocation_size;
+        VideoCore::VramMonitor::buffer_resident_bytes.store(residency_allocated_bytes);
         return memory;
     };
     // Ranges keep coming as the game streams data in. Carving them out of large chunks keeps the
@@ -1299,6 +1304,7 @@ std::pair<vk::DeviceMemory, u64> BufferCache::AllocateResidency(u64 size) {
         }
         residency_chunk = Vulkan::Check(std::move(chunk));
         residency_allocated_bytes += RESIDENCY_CHUNK_SIZE;
+        VideoCore::VramMonitor::buffer_resident_bytes.store(residency_allocated_bytes);
         residency_chunk_used = 0;
     }
     const u64 offset = residency_chunk_used;

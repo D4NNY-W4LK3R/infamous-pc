@@ -1204,6 +1204,8 @@ set(VIDEO_CORE src/video_core/amdgpu/cb_db_extent.h
                src/video_core/texture_cache/sampler.cpp
                src/video_core/texture_cache/sampler.h
                src/video_core/texture_cache/texture_cache.cpp
+               src/video_core/vram_monitor.cpp
+               src/video_core/vram_monitor.h
                src/video_core/texture_cache/texture_cache.h
                src/video_core/texture_cache/tile_manager.cpp
                src/video_core/texture_cache/tile_manager.h
@@ -1428,7 +1430,7 @@ elseif (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
 endif()
 
 if (WIN32)
-    target_link_libraries(shadps4 PRIVATE mincore wepoll wbemuuid)
+    target_link_libraries(shadps4 PRIVATE mincore wepoll wbemuuid pdh)
 
     if (MSVC)
         # MSVC likes putting opinions on what people can use, disable:

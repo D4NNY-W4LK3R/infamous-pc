@@ -517,6 +517,34 @@ std::vector<std::string> GamePatchNotes() {
     return Core::SecondSonPatches::Applied().notes;
 }
 
+bool VramPriorities() {
+    if (!g_dir.empty()) {
+        return g_settings.vram_priorities;
+    }
+    const auto dir = Common::FS::GetUserPath(Common::FS::PathType::UserDir) / "adaptive";
+    return LoadSettings(dir / "settings.ini", EnvGet).vram_priorities;
+}
+
+void SetVramPriorities(bool on) {
+    const auto dir = g_dir.empty()
+                         ? Common::FS::GetUserPath(Common::FS::PathType::UserDir) / "adaptive"
+                         : g_dir;
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    UserSettings s = g_dir.empty() ? LoadSettings(dir / "settings.ini",
+                                                  [](const std::string&) { return std::nullopt; })
+                                   : g_settings;
+    if (s.vram_priorities == on) {
+        return;
+    }
+    s.vram_priorities = on;
+    SaveSettings(dir / "settings.ini", s);
+    if (!g_dir.empty()) {
+        g_settings.vram_priorities = on;
+    }
+    LOG_INFO(Render, "VRAM priorities {} from the next launch", on ? "on" : "off");
+}
+
 std::uint32_t FrameLimit() {
     return Common::FrameLimit::Get();
 }

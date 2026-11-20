@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <unordered_set>
+
 #include <mutex>
 #include <absl/container/flat_hash_map.h>
 #include <absl/container/flat_hash_set.h>
@@ -453,6 +455,9 @@ private:
     absl::flat_hash_map<u64, SamplerId> samplers;
     absl::flat_hash_set<ImageId> download_images;
     u64 total_used_memory = 0;
+    /// Memory blocks whose priority was raised for images drawn to (VRAM priorities).
+    std::unordered_set<VkDeviceMemory> raised_blocks;
+    void RaisePriority(Image& image);
     u64 trigger_gc_memory = 0;
     u64 pressure_gc_memory = 0;
     u64 critical_gc_memory = 0;
