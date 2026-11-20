@@ -149,24 +149,24 @@ void Run(std::stop_token stop) {
     found.reserve(StackBytes / 8 + 1);
     const auto start = std::chrono::steady_clock::now();
     auto last_report = start;
-    u32 reported_sideways = 0;
+    u32 reported_total = 0;
     while (!stop.stop_requested()) {
         std::this_thread::sleep_for(SampleInterval);
         Sample(state, words, found);
         const auto now = std::chrono::steady_clock::now();
         bool full = true;
-        u32 sideways = 0;
+        u32 total = 0;
         {
             std::scoped_lock lock{state.mutex};
             for (std::size_t b = 0; b < NumBuckets; ++b) {
                 full = full && state.samples[b] >= MaxSamples[b];
+                total += state.samples[b];
             }
-            sideways = state.samples[2];
         }
         const bool done = full || now - start >= StopAfter;
-        if (done || (now - last_report >= std::chrono::minutes{1} && sideways != reported_sideways)) {
+        if (done || (now - last_report >= std::chrono::minutes{1} && total != reported_total)) {
             last_report = now;
-            reported_sideways = sideways;
+            reported_total = total;
             Report();
         }
         if (done) {

@@ -30,7 +30,8 @@ void SetGameCode(VAddr base, u64 size);
 /// Called by the game's thread that reads the pad (its main thread): sampled from then on.
 void NoteGameThread();
 
-/// Logs what was found; called at shutdown, and every minute while sampling.
+/// Logs what was found: at shutdown (Adaptive::Glue::Shutdown), and every minute while the
+/// counts grow.
 void Report();
 
 /// Pure part, tested: addresses in at least `min_share` of the samples of `bucket` and at most

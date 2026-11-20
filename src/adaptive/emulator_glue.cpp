@@ -24,6 +24,7 @@
 #include "common/thread.h"
 #include "common/shared_user_dir.h"
 #include "core/emulator_settings.h"
+#include "core/stencil_probe.h"
 #include "core/second_son_patches.h"
 #include "imgui/notice_layer.h"
 #include "video_core/renderer_vulkan/vk_pipeline_compiler.h"
@@ -398,6 +399,7 @@ bool LateReadTurnedOffAfterCrash() {
 }
 
 void Shutdown() {
+    Core::StencilProbe::Report();
     if (!g_crashed.load(std::memory_order_relaxed) && !g_dir.empty()) {
         std::error_code ec;
         std::filesystem::remove(g_dir / "late-read-active.txt", ec);
