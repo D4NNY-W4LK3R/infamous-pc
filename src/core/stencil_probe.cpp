@@ -7,6 +7,8 @@
 #include <cstdlib>
 #include <string>
 
+#include <fmt/format.h>
+
 #include "common/logging/log.h"
 #include "core/mouse_aim.h"
 #include "input/controller.h"
