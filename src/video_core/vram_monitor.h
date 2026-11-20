@@ -29,6 +29,8 @@ extern std::atomic<u64> buffer_resident_bytes;
 extern std::atomic<u64> image_bytes;
 extern std::atomic<u32> image_count;
 extern std::atomic<u32> raised_image_blocks;
+/// Buffer memory left out of video memory as zeros (build 44).
+extern std::atomic<u64> lazy_zero_bytes;
 
 /// Starts the monitor's thread (once), and stops it before the instance goes.
 void Start(const Vulkan::Instance& instance);

@@ -78,6 +78,7 @@ void SettingsWindow::LoadSettings(std::string profile) {
         particleLateReadSetting = patches.particle_late_read;
         particleLightsSetting = patches.particle_light_one_submit;
         vramPrioritiesSetting = Adaptive::Glue::VramPriorities();
+        lazyZeroSetting = Adaptive::Glue::LazyZeroMemory();
         const auto target = Adaptive::Glue::GetFpsTarget();
         const auto it = std::find(fpsTargetValues.begin(), fpsTargetValues.end(), target.fps);
         fpsTargetSetting =
@@ -166,6 +167,7 @@ void SettingsWindow::SaveSettings(std::string profile) {
             now.particle_light_one_submit != before.particle_light_one_submit) {
             Adaptive::Glue::SetGamePatches(now);
         }
+        Adaptive::Glue::SetLazyZeroMemory(lazyZeroSetting);
         const auto target_before = Adaptive::Glue::GetFpsTarget();
         const Adaptive::Glue::FpsTarget target_now{fpsTargetValues.at(fpsTargetSetting),
                                                    static_cast<u32>(lowestQualitySetting),
@@ -810,6 +812,9 @@ void SettingsWindow::DrawSettingsTable(SettingsCategory category) {
                                    "next launch)",
                                    particleLightsSetting);
             }
+            AddSettingCheckbox("Leave Empty Buffer Memory Out of Video Memory (Experimental, "
+                               "Next Launch)",
+                               lazyZeroSetting);
             AddSettingSliderInt("Window Width", windowWidthSetting, 0, 8000);
             AddSettingSliderInt("Window Height", windowHeightSetting, 0, 7000);
             AddSettingCheckbox("Enable HDR", hdrAllowedSetting);

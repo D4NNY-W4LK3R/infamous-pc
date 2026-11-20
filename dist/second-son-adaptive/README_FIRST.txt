@@ -179,7 +179,12 @@ TROUBLESHOOTING
   reads (two texel buffers over 3 GB of its memory, all of it kept in video memory), how much
   holds only zeros - memory that would not need to be in video memory.
   Shake (T): since build 43 along the controller's own up, so mouse aiming no longer turns it
-  into a sideways motion the game does not count. Build 38 also samples the game's main thread while the
+  into a sideways motion the game does not count. Since build 44 holding G or H no longer turns
+  the mouse's up and down around (stencil art works without P or tilting).
+  Experimental, build 44: F3 > Graphics > "Leave Empty Buffer Memory Out of Video Memory" (next
+  launch). Of the 3 GB the game reads through two buffers, about 1.4 GB holds only zeros; with
+  this on, those parts are not put in video memory until data lands there. The "VRAM:" lines
+  show how much was left out. Build 38 also samples the game's main thread while the
   spray can is out (stencil probe, SS_STENCIL_PROBE=0: off), to find how to tell stencil art
   from other graffiti without P.
   Back to the plain 4 GB behaviour for one run: set SS_ADAPTIVE=0 and SHADPS4_MOUSE_AIM=0

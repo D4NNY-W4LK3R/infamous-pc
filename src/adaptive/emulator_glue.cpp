@@ -545,6 +545,35 @@ void SetVramPriorities(bool on) {
     LOG_INFO(Render, "VRAM priorities {} from the next launch", on ? "on" : "off");
 }
 
+bool LazyZeroMemory() {
+    if (!g_dir.empty()) {
+        return g_settings.lazy_zero_memory;
+    }
+    const auto dir = Common::FS::GetUserPath(Common::FS::PathType::UserDir) / "adaptive";
+    return LoadSettings(dir / "settings.ini", EnvGet).lazy_zero_memory;
+}
+
+void SetLazyZeroMemory(bool on) {
+    const auto dir = g_dir.empty()
+                         ? Common::FS::GetUserPath(Common::FS::PathType::UserDir) / "adaptive"
+                         : g_dir;
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    UserSettings s = g_dir.empty() ? LoadSettings(dir / "settings.ini",
+                                                  [](const std::string&) { return std::nullopt; })
+                                   : g_settings;
+    if (s.lazy_zero_memory == on) {
+        return;
+    }
+    s.lazy_zero_memory = on;
+    SaveSettings(dir / "settings.ini", s);
+    if (!g_dir.empty()) {
+        g_settings.lazy_zero_memory = on;
+    }
+    LOG_INFO(Render, "Empty buffer memory left out of video memory {} from the next launch",
+             on ? "on" : "off");
+}
+
 std::uint32_t FrameLimit() {
     return Common::FrameLimit::Get();
 }

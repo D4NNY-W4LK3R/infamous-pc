@@ -18,6 +18,8 @@
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/buffer_cache.h"
+#include "video_core/buffer_cache/lazy_zero.h"
+#include "adaptive/emulator_glue.h"
 #include "video_core/vram_monitor.h"
 #include "video_core/buffer_cache/memory_tracker.h"
 #include "video_core/buffer_cache/region_definitions.h"
@@ -145,6 +147,17 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     readback_thread = std::jthread{[this](std::stop_token token) { ReadbackThread(token); }};
 
     sync_large_reads_once = EmulatorSettings.IsSyncLargeReadsOnce();
+    // Memory waiting as zeros (F3, experimental, build 44) relies on reads of memory that is not
+    // resident giving zeros.
+    const bool zeros_guaranteed = instance.GetPhysicalDevice()
+                                      .getProperties()
+                                      .sparseProperties.residencyNonResidentStrict;
+    lazy_zero_enabled = Adaptive::Glue::LazyZeroMemory() && zeros_guaranteed;
+    LOG_INFO(Render, "Empty buffer memory left out of video memory: {}",
+             lazy_zero_enabled ? "on"
+             : zeros_guaranteed
+                 ? "off (F3 to turn on, next launch)"
+                 : "not available (the driver does not promise zeros for memory left out)");
     defer_uploads = EmulatorSettings.IsUploadThread();
     if (defer_uploads) {
         upload_thread = std::jthread{[this](std::stop_token token) { UploadThread(token); }};
@@ -1005,7 +1018,11 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     const u64 first_block = device_addr >> block_shift;
     const u64 last_block = (device_addr + size - 1) >> block_shift;
     const auto* arena = GetArena(first_block, last_block);
-    EnsureResident(arena, first_block, last_block);
+    if (lazy_zero_enabled && !is_written && size >= LARGE_READ_THRESHOLD) {
+        EnsureResidentLazy(arena, first_block, last_block);
+    } else {
+        EnsureResident(arena, first_block, last_block);
+    }
     bool copied_back = false;
     if (is_written) {
         // Before the memory is marked GPU modified, so a game thread about to apply an older copy
@@ -1263,7 +1280,7 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
         return;
     }
 
-    u32 resident_blocks{};
+    u64 resident_blocks{};
     IntervalList bind_ranges;
     resident_ranges.ForEachGap(bind_first, bind_end, [&](u64 start, u64 end) {
         resident_blocks += end - start;
@@ -1273,6 +1290,25 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
     if (bind_ranges.Empty()) {
         return;
     }
+    // Blocks left out as zeros now come into use for something else: they read as zeros again
+    // once resident (build 44).
+    IntervalList<> zeros;
+    if (!lazy_zero_blocks.Empty()) {
+        for (const auto& range : bind_ranges) {
+            lazy_zero_blocks.ForEachInRange(range.start, range.end, [&](const Interval& lazy) {
+                zeros.Add({std::max(range.start, lazy.start), std::min(range.end, lazy.end)});
+            });
+        }
+    }
+    BindRanges(arena, bind_ranges, resident_blocks);
+    if (!zeros.Empty()) {
+        UploadAhead(arena, zeros);
+        RemoveLazyZeroRanges(zeros);
+    }
+}
+
+void BufferCache::BindRanges(const Buffer* arena, const IntervalList<>& bind_ranges,
+                             u64 resident_blocks) {
     Common::Perf::ScopedStall stall{Common::Perf::Stall::Residency,
                                     u64{resident_blocks} << block_shift};
     // Memory that comes into use may hold what the CPU wrote, which isn't on the GPU yet.
@@ -1315,6 +1351,166 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
 
     staging.Flush();
     runtime.CopyBuffer(staging.buffer, bda_pagetable_buffer.get(), copies);
+}
+
+void BufferCache::RemoveLazyZero(u64 start, u64 end) {
+    IntervalList<> one;
+    one.Add({start, end});
+    RemoveLazyZeroRanges(one);
+}
+
+void BufferCache::RemoveLazyZeroRanges(const IntervalList<>& removed) {
+    if (removed.Empty()) {
+        return;
+    }
+    lazy_zero_blocks = LazyZero::Subtract(lazy_zero_blocks, removed);
+    ++lazy_zero_generation;
+    PublishLazyZero();
+}
+
+void BufferCache::PublishLazyZero() {
+    u64 blocks = 0;
+    for (const auto& lazy : lazy_zero_blocks) {
+        blocks += lazy.end - lazy.start;
+    }
+    VideoCore::VramMonitor::lazy_zero_bytes.store(blocks << block_shift);
+}
+
+void BufferCache::EnsureResidentLazy(const Buffer* arena, u64 first_block, u64 last_block) {
+    // A large range read from, like the texel buffers inFAMOUS Second Son binds over 3 GB of its
+    // memory, is made resident only where something is uploaded to it that is not all zeros (see
+    // FilterLazyCopies) or written: its blocks not resident yet are taken as zeros until then,
+    // which is what reading memory that is not resident gives. Over 1.4 GB of those 3 GB held
+    // only zeros, in 64 KB blocks between others (build 44).
+    const u64 end = last_block + 1;
+    for (const auto& hint : lazy_cover_hints) {
+        if (hint.first == first_block && hint.end == end &&
+            hint.generation == lazy_zero_generation) {
+            return;
+        }
+    }
+    IntervalList<> waiting;
+    resident_ranges.ForEachGap(first_block, end, [&](u64 start, u64 gap_end) {
+        lazy_zero_blocks.ForEachGap(start, gap_end,
+                                    [&](u64 a, u64 b) { waiting.Add({a, b}); });
+    });
+    for (const auto& range : waiting) {
+        lazy_zero_blocks.Add(range);
+    }
+    if (!waiting.Empty()) {
+        PublishLazyZero();
+    }
+    lazy_cover_hints[next_lazy_hint] = {first_block, end, lazy_zero_generation};
+    next_lazy_hint = (next_lazy_hint + 1) % lazy_cover_hints.size();
+}
+
+bool BufferCache::CopiesTouchLazy(std::span<const vk::BufferCopy> copies) const {
+    return std::ranges::any_of(copies, [&](const vk::BufferCopy& copy) {
+        return lazy_zero_blocks.Overlaps(copy.dstOffset >> block_shift,
+                                         ((copy.dstOffset + copy.size - 1) >> block_shift) + 1);
+    });
+}
+
+void BufferCache::FilterLazyCopies(const Buffer* arena,
+                                   boost::container::small_vector<vk::BufferCopy, 4>& copies,
+                                   size_t& total_size_bytes) {
+    // The copies hold guest addresses in dstOffset here. What would land in blocks taken as
+    // zeros is left out if it is all zeros; otherwise those blocks are made resident first, and
+    // cleared where the copies do not cover them. The pages were protected already, so a guest
+    // write after the look faults and is uploaded later.
+    std::vector<LazyZero::Piece> pieces;
+    pieces.reserve(copies.size());
+    for (const auto& copy : copies) {
+        pieces.push_back({copy.dstOffset, copy.size});
+    }
+    zero_check_buffer.resize(block_size);
+    const auto split =
+        LazyZero::SplitUploads(pieces, lazy_zero_blocks, block_shift, [&](u64 addr, u64 size) {
+            memory->CopySparseMemory(addr, zero_check_buffer.data(), size);
+            return std::all_of(zero_check_buffer.begin(),
+                               zero_check_buffer.begin() + static_cast<std::ptrdiff_t>(size),
+                               [](u8 b) { return b == 0; });
+        });
+    if (!split.wake.Empty()) {
+        WakeBlocks(arena, split.wake);
+    }
+    lazy_zero_skipped_bytes += split.dropped;
+    copies.clear();
+    u64 offset = 0;
+    for (const auto& piece : split.kept) {
+        copies.push_back(vk::BufferCopy{offset, piece.addr, piece.size});
+        offset += piece.size;
+    }
+    total_size_bytes = offset;
+}
+
+void BufferCache::WakeLazyZero(const Buffer* arena, VAddr device_addr, u64 size) {
+    if (lazy_zero_blocks.Empty() || size == 0) {
+        return;
+    }
+    const u64 first = device_addr >> block_shift;
+    const u64 end = ((device_addr + size - 1) >> block_shift) + 1;
+    if (!lazy_zero_blocks.Overlaps(first, end)) {
+        return;
+    }
+    IntervalList<> zeros;
+    lazy_zero_blocks.ForEachInRange(first, end, [&](const Interval& lazy) {
+        zeros.Add({std::max(first, lazy.start), std::min(end, lazy.end)});
+    });
+    WakeBlocks(arena, zeros);
+}
+
+void BufferCache::WakeBlocks(const Buffer* arena, const IntervalList<>& blocks) {
+    u64 count = 0;
+    for (const auto& range : blocks) {
+        count += range.end - range.start;
+    }
+    BindRanges(arena, blocks, count);
+    UploadAhead(arena, blocks);
+    RemoveLazyZeroRanges(blocks);
+}
+
+void BufferCache::UploadAhead(const Buffer* arena, const IntervalList<>& blocks) {
+    // Memory just made resident holds nothing defined, and the binding counts for all of the
+    // session, also for work recorded before that read the blocks as zeros. Guest memory holds
+    // what the GPU should see there, so the blocks are copied from it in the session's upload
+    // command buffer, which runs before the rest of it (build 44).
+    boost::container::small_vector<vk::BufferCopy, 8> copies;
+    Vulkan::StagingBufferRef staging{};
+    u64 part_bytes = 0;
+    bool first_part = true;
+    const auto flush = [&] {
+        if (part_bytes == 0) {
+            return;
+        }
+        staging.Flush();
+        runtime.UploadBufferAhead(staging.buffer, arena, copies);
+        copies.clear();
+        part_bytes = 0;
+    };
+    for (const auto& range : blocks) {
+        const VAddr start = range.start << block_shift;
+        const VAddr stop = range.end << block_shift;
+        for (VAddr addr = start; addr < stop;) {
+            if (part_bytes == 0) {
+                if (!first_part) {
+                    // The staging memory is free again once the GPU copied the last part.
+                    scheduler.Finish();
+                }
+                first_part = false;
+                staging = staging_pool.Request(MaxUploadPartBytes, MemoryType::HostUncached);
+            }
+            const u64 size = std::min<u64>(stop - addr, MaxUploadPartBytes - part_bytes);
+            memory->CopySparseMemory(addr, staging.mapped + part_bytes, size);
+            copies.emplace_back(staging.offset + part_bytes, addr - arena->cpu_addr, size);
+            part_bytes += size;
+            addr += size;
+            if (part_bytes == MaxUploadPartBytes) {
+                flush();
+            }
+        }
+    }
+    flush();
 }
 
 std::pair<vk::DeviceMemory, u64> BufferCache::AllocateResidency(u64 size) {
@@ -1385,10 +1581,16 @@ std::pair<vk::DeviceMemory, u64> BufferCache::AllocateResidency(u64 size) {
 bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 size,
                                     bool is_written, bool is_texel_buffer) {
     CheckComputeOverlap(device_addr, size);
+    // Memory taken as zeros is looked at before its upload is recorded, with its pages protected
+    // already (build 44).
+    const bool lazy_range =
+        !lazy_zero_blocks.Empty() &&
+        lazy_zero_blocks.Overlaps(device_addr >> block_shift,
+                                  ((device_addr + size - 1) >> block_shift) + 1);
     // The upload worker takes the read-only uploads. It applies the page protection of
     // what it uploads before copying: a guest write meanwhile is caught by its snapshot,
     // one after it faults and re-dirties the page.
-    const bool async_upload = upload_worker && !is_written && !is_texel_buffer;
+    const bool async_upload = upload_worker && !is_written && !is_texel_buffer && !lazy_range;
     if (async_upload) {
         deferred_pages.clear();
         PageManager::DeferProtect(&deferred_pages);
@@ -1419,14 +1621,19 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
             // protections to deferred_pages, so the host-thread duplicate is dropped.
             upload.protects.clear();
             defer = false;
-        } else if (total_size_bytes > MaxDeferredUploadBytes) {
-            // Too large to leave, it is protected and copied here after all.
+        } else if (total_size_bytes > MaxDeferredUploadBytes ||
+                   (lazy_range && CopiesTouchLazy(copies))) {
+            // Too large to leave, or to be looked at for zeros first: it is protected and copied
+            // here after all.
             for (const auto& [first_page, num_pages] : upload.protects) {
                 page_manager.ApplyProtection(first_page, num_pages);
             }
             upload.protects.clear();
             defer = false;
         }
+    }
+    if (lazy_range && CopiesTouchLazy(copies)) {
+        FilterLazyCopies(arena, copies, total_size_bytes);
     }
     if (async_upload) {
         if (!copies.empty()) {
@@ -1537,6 +1744,7 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_a
     if (auto type = texture_cache.IsMeta(device_addr)) {
         if (*type == TextureCache::MetaType::HTile) {
             static constexpr u32 ZmaskUncompressed = 0xf;
+            WakeLazyZero(arena, device_addr, size);
             runtime.FillBuffer(arena, arena->Offset(device_addr), size, ZmaskUncompressed);
             return true;
         } else {
@@ -1578,6 +1786,7 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_a
     if (buffer_copies.empty()) {
         return false;
     }
+    WakeLazyZero(arena, device_addr, image.info.guest_size);
     auto& tile_manager = texture_cache.GetTileManager();
     tile_manager.TileImage(image, buffer_copies, arena, arena_offset);
     return true;

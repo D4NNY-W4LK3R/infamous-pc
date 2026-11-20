@@ -260,6 +260,20 @@ private:
     const Buffer* GetArena(u64 first_block, u64 last_block);
 
     void EnsureResident(const Buffer* arena, u64 first_block, u64 last_block);
+    /// Binds memory to the arena for the given block ranges, none of them resident.
+    void BindRanges(const Buffer* arena, const IntervalList<>& bind_ranges, u64 resident_blocks);
+    /// Memory of large ranges read from that waits as zeros, see EnsureResidentLazy (build 44).
+    void EnsureResidentLazy(const Buffer* arena, u64 first_block, u64 last_block);
+    bool CopiesTouchLazy(std::span<const vk::BufferCopy> copies) const;
+    void FilterLazyCopies(const Buffer* arena,
+                          boost::container::small_vector<vk::BufferCopy, 4>& copies,
+                          size_t& total_size_bytes);
+    void WakeLazyZero(const Buffer* arena, VAddr device_addr, u64 size);
+    void RemoveLazyZero(u64 start, u64 end);
+    void RemoveLazyZeroRanges(const IntervalList<>& removed);
+    void WakeBlocks(const Buffer* arena, const IntervalList<>& blocks);
+    void UploadAhead(const Buffer* arena, const IntervalList<>& blocks);
+    void PublishLazyZero();
 
     /// Returns device memory and an offset into it to back size bytes of arena blocks.
     std::pair<vk::DeviceMemory, u64> AllocateResidency(u64 size);
@@ -449,6 +463,19 @@ private:
     /// Resident ranges memory was lately found in, in blocks, see EnsureResident.
     std::array<std::pair<u64, u64>, 16> resident_hints{};
     size_t next_resident_hint{};
+    /// Blocks of large ranges read from that are not resident and taken as zeros (build 44).
+    IntervalList<> lazy_zero_blocks;
+    bool lazy_zero_enabled{};
+    u64 lazy_zero_generation{};
+    u64 lazy_zero_skipped_bytes{};
+    struct LazyCoverHint {
+        u64 first;
+        u64 end;
+        u64 generation;
+    };
+    std::array<LazyCoverHint, 4> lazy_cover_hints{};
+    size_t next_lazy_hint{};
+    std::vector<u8> zero_check_buffer;
     vk::DeviceMemory residency_chunk{};
     u64 residency_chunk_used{};
     /// Device memory allocated for residency so far, for the log when an allocation fails.

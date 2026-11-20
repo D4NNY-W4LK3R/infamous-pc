@@ -187,6 +187,20 @@ void Runtime::UploadBuffer(const VideoCore::Buffer* src, const VideoCore::Buffer
     }
 }
 
+void Runtime::UploadBufferAhead(const VideoCore::Buffer* src, const VideoCore::Buffer* dst,
+                                std::span<const vk::BufferCopy> copies) {
+    Common::Perf::Count(Common::Perf::Counter::BufferUploadsAhead);
+    scheduler.UploadCommandBuffer().copyBuffer(src->Handle(), dst->Handle(), copies);
+    const u64 session = scheduler.SessionId();
+    for (const auto& copy : copies) {
+        dst->accesses.session.Add(copy.dstOffset, copy.dstOffset + copy.size, session);
+        if (async_scheduler) {
+            dst->accesses.graphics_in_flight.Add(copy.dstOffset, copy.dstOffset + copy.size,
+                                                 scheduler.CurrentTick(), true);
+        }
+    }
+}
+
 void Runtime::NoteBufferRead(const VideoCore::Buffer* handle, u64 offset, u64 size) {
     handle->accesses.session.Add(offset, offset + size, scheduler.SessionId());
     if (async_scheduler && size < LargeReadSize) {

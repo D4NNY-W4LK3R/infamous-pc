@@ -88,6 +88,9 @@ GamePatchSettings GamePatches();
 /// VRAM priorities (F3 > Graphics, next launch): the saved setting, and saving it.
 bool VramPriorities();
 void SetVramPriorities(bool on);
+/// Empty buffer memory left out of video memory (F3 > Graphics, next launch).
+bool LazyZeroMemory();
+void SetLazyZeroMemory(bool on);
 /// Saves them for the next launch.
 void SetGamePatches(const GamePatchSettings& patches);
 /// The performance mode this launch uses: the frame-rate target's choice, else the setting.

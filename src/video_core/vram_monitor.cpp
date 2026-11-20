@@ -32,6 +32,7 @@ std::atomic<u64> buffer_resident_bytes{0};
 std::atomic<u64> image_bytes{0};
 std::atomic<u32> image_count{0};
 std::atomic<u32> raised_image_blocks{0};
+std::atomic<u64> lazy_zero_bytes{0};
 
 namespace {
 
@@ -239,9 +240,10 @@ void Run(std::stop_token stop, const Vulkan::Instance* instance) {
         }
         LOG_INFO(Render,
                  "VRAM: Vulkan video memory in use {} MB of a {} MB budget ({}); buffers made "
-                 "resident {} MB, images {} MB in {}, {} memory blocks raised for images drawn "
-                 "to; {}",
+                 "resident {} MB ({} MB left out as zeros), images {} MB in {}, {} memory "
+                 "blocks raised for images drawn to; {}",
                  used / MB, budget / MB, heaps, buffer_resident_bytes.load() / MB,
+                 lazy_zero_bytes.load() / MB,
                  image_bytes.load() / MB, image_count.load(), raised_image_blocks.load(),
                  windows_text);
         samples = 0;

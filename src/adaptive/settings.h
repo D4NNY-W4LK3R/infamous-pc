@@ -20,6 +20,8 @@
 //   fps_target = 0         the optimizer lowers the game's quality level (per launch) to reach
 //                          this frame rate; 0 = off
 //   auto_perf_max = off    the lowest quality it may use: off (none) | low | office
+//   lazy_zero_memory = 0   leave empty buffer memory out of video memory (next launch;
+//                          SS_LAZY_ZERO_MEMORY)
 //   vram_priorities = 0    memory priorities for the driver: buffers highest, images drawn to
 //                          next, textures last (next launch; SS_VRAM_PRIORITIES)
 //
@@ -60,6 +62,9 @@ struct UserSettings {
     /// VRAM priorities (build 41, next launch): buffers' memory highest, images drawn to higher
     /// than textures, so the driver moves textures out first on a card short of memory.
     bool vram_priorities = false;
+    /// Empty buffer memory left out of video memory (build 44, next launch): blocks of the large
+    /// ranges the game reads that hold only zeros are not made resident until data lands there.
+    bool lazy_zero_memory = false;
     std::vector<std::string> warnings; ///< unknown keys, bad values (not fatal)
 };
 

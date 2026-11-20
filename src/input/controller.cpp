@@ -329,6 +329,8 @@ void GameController::EnableMotionEmulationLocked() {
     m_motion_emulated = true;
     m_emu_aim = {0.0f, 0.0f, 0.0f, 1.0f};
     m_emu_pose = {0.0f, 0.0f, 0.0f, 1.0f};
+    m_emu_prev_aim = {0.0f, 0.0f, 0.0f, 1.0f};
+    m_emu_prev_roll = 0.0f;
     std::fill(m_emu_world_rate, m_emu_world_rate + 3, 0.0f);
     m_emu_roll = 0.0f;
     m_emu_tilt_left = false;
@@ -360,20 +362,27 @@ void GameController::UpdateEmulatedMotionLocked(u64 timestamp) {
     const Quaternion roll{0.0f, 0.0f, std::sin(0.5f * m_emu_roll), std::cos(0.5f * m_emu_roll)};
     const Quaternion pose = Multiply(m_emu_aim, roll);
 
-    // The gyro reports the rotation between the previous pose and this one, in controller axes.
-    Quaternion delta = Multiply(Conjugate(m_emu_pose), pose);
+    // The gyro reports the mouse's turn as if the controller were held upright, and the tilt as
+    // a turn around its Z axis. Reported in the axes of the tilted controller, holding H turned
+    // the mouse's up and down into the other way round in the game (build 43, stencil art),
+    // which reads the gyro the upright way whatever the tilt.
+    Quaternion delta = Multiply(Conjugate(m_emu_prev_aim), m_emu_aim);
     if (delta.w < 0.0f) {
         delta = {-delta.x, -delta.y, -delta.z, -delta.w};
     }
     const float sin_half = std::sqrt(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
+    std::fill(gyro_buf, gyro_buf + 3, 0.0f);
     if (dt > 0.0f && sin_half > 1e-6f) {
         const float scale = 2.0f * std::atan2(sin_half, delta.w) / (sin_half * dt);
         gyro_buf[0] = delta.x * scale;
         gyro_buf[1] = delta.y * scale;
         gyro_buf[2] = delta.z * scale;
-    } else {
-        std::fill(gyro_buf, gyro_buf + 3, 0.0f);
     }
+    if (dt > 0.0f) {
+        gyro_buf[2] += (m_emu_roll - m_emu_prev_roll) / dt;
+    }
+    m_emu_prev_aim = m_emu_aim;
+    m_emu_prev_roll = m_emu_roll;
     m_emu_pose = pose;
 
     // The accelerometer reports the reaction to gravity, turned into controller axes, plus the

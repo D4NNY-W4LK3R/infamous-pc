@@ -52,6 +52,10 @@ public:
     void NoteUntrackedAccess();
 
     void FillBuffer(const VideoCore::Buffer* dst, u64 offset, u64 size, u32 value);
+    /// Records the copies in the session's upload command buffer whatever touched the memory
+    /// before, for memory just made resident (build 44); later copies to it come after.
+    void UploadBufferAhead(const VideoCore::Buffer* src, const VideoCore::Buffer* dst,
+                           std::span<const vk::BufferCopy> copies);
 
     void InlineData(VideoCore::Buffer* dst, u64 offset, u32 value);
 

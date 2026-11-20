@@ -158,6 +158,9 @@ private:
     bool m_motion_emulated{};
     Libraries::Pad::OrbisFQuaternion m_emu_aim{0.0f, 0.0f, 0.0f, 1.0f};
     Libraries::Pad::OrbisFQuaternion m_emu_pose{0.0f, 0.0f, 0.0f, 1.0f};
+    /// The aim and roll the gyro was last reported from (build 44).
+    Libraries::Pad::OrbisFQuaternion m_emu_prev_aim{0.0f, 0.0f, 0.0f, 1.0f};
+    float m_emu_prev_roll{};
     float m_emu_world_rate[3]{};
     float m_emu_roll{};
     bool m_emu_tilt_left{};
