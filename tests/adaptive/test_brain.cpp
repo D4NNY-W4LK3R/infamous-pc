@@ -955,3 +955,35 @@ TEST(Brain, ReportCountsFreezesPerScene) {
     EXPECT_EQ(section.find("gameplay: 0 freezes"), std::string::npos) << section;
     EXPECT_NE(section.find("per 10 minutes"), std::string::npos) << section;
 }
+
+TEST(Brain, ReportNamesWhatHoldsTheFrameRateBack) {
+    const auto dir = TempDir("limits");
+    World w;
+    w.draws = Moving;
+    w.input = true;
+    // 25 fps with the card busy half the frame, and the game's threads stalled in page faults
+    // and copies back, as in the player's sessions.
+    w.frame_ms = [](World&) { return 40.0; };
+    w.decorate = [](World&, FrameSample& f) {
+        f.gpu_busy_ms = 20.0f;
+        f.stall_ms[static_cast<std::size_t>(StallKind::PageFault)] = 15.0f;
+        f.stall_ms[static_cast<std::size_t>(StallKind::ReadbackWait)] = 5.0f;
+        return 0.0;
+    };
+    Rig rig(w, dir, Mode::Observe);
+    rig.Start();
+    w.Seconds(*rig.brain, 90);
+    const auto path = rig.brain->Shutdown();
+    ASSERT_FALSE(path.empty());
+    std::ifstream in{path};
+    std::stringstream ss;
+    ss << in.rdbuf();
+    const std::string report = ss.str();
+    const auto at = report.find("== What holds the frame rate back");
+    ASSERT_NE(at, std::string::npos) << report;
+    const std::string section = report.substr(at, report.find("== Freezes") - at);
+    EXPECT_NE(section.find("seconds under 30 fps"), std::string::npos) << section;
+    EXPECT_EQ(section.find(" 0 of "), std::string::npos) << section;
+    EXPECT_NE(section.find("graphics card busy 20.0 ms ("), std::string::npos) << section;
+    EXPECT_NE(section.find("game's own threads"), std::string::npos) << section;
+}

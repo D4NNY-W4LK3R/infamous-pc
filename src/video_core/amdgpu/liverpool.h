@@ -118,14 +118,31 @@ public:
                 ++num_commands;
                 submit_cv.notify_one();
             }
+            WakeFromPresentationWait();
             sem.acquire();
         } else {
-            std::scoped_lock lk{submit_mutex};
-            command_queue.emplace(std::move(func));
-            ++num_commands;
-            submit_cv.notify_one();
+            {
+                std::scoped_lock lk{submit_mutex};
+                command_queue.emplace(std::move(func));
+                ++num_commands;
+                submit_cv.notify_one();
+            }
+            WakeFromPresentationWait();
         }
     }
+
+    /// A game thread asking for a copy back waited for the GPU thread to finish waiting for
+    /// presentation before it was taken up: 3 to 7 ms on average in inFAMOUS Second Son, with its
+    /// main thread spending a third of its time in faults waiting for copies back. The GPU thread
+    /// marks that wait, and a command wakes it to run the command and wait again.
+    void WakeFromPresentationWait() {
+        // Seq-cst with ++num_commands before it and the store before the waiter checks it: either
+        // this sees the waiter, or the waiter sees the command.
+        if (in_presentation_wait.load()) {
+            WakePresentationWaiter();
+        }
+    }
+    void WakePresentationWaiter();
 
     void ReserveCopyBufferSpace() {
         GpuQueue& gfx_queue = mapped_queues[GfxQueueId];
@@ -268,6 +285,8 @@ private:
     std::jthread process_thread{};
     std::atomic<u32> num_submits{};
     std::atomic<u32> num_commands{};
+    /// Whether the GPU thread waits for presentation in a way commands can wake.
+    std::atomic<bool> in_presentation_wait{};
     std::atomic<bool> submit_done{};
     std::mutex submit_mutex;
     std::condition_variable_any submit_cv;

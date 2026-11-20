@@ -93,6 +93,12 @@ THE OPTIMIZER (F1)
   build 34 the driver's cache is kept under 64 MB (two starts froze on bigger ones), and a
   start whose loading stops for 45 s goes on by itself and sets that cache aside next time.
   The report's "Freezes" section shows the time lost to freezes per 10 minutes of play.
+  The report's "What holds the frame rate back" section shows, for the seconds of play under
+  30 fps, how busy the graphics card and the emulator's GPU thread were and how long the game's
+  own threads waited on memory shared with the card. When the card had time to spare, a lower
+  quality will not raise the frame rate. Since build 35 a game thread asking for data back from
+  the card is answered while the emulator waits for a frame to be shown, instead of after it
+  (SS_WAKE_FOR_COPIES=0 turns that off).
   SS_FAST_FIRST_COMPILE=1 builds an effect shader the game needs right now without the
   driver's optimizations first (the optimized one replaces it). Off by default: on a GTX 1650
   those builds were slower, not quicker.

@@ -55,6 +55,20 @@ struct VideoOutPort {
         vo_cv.wait(lk, pred);
     }
 
+    /// Like WaitVoLabel, but also returns when `woken` holds, for work the waiting thread has to
+    /// do in between. Returns whether `pred` holds.
+    bool WaitVoLabelOr(auto&& pred, auto&& woken) {
+        std::unique_lock lk{vo_mutex};
+        vo_cv.wait(lk, [&] { return pred() || woken(); });
+        return pred();
+    }
+
+    /// Wakes a thread in WaitVoLabelOr to check its `woken`.
+    void WakeVoWaiter() {
+        std::scoped_lock lk{vo_mutex};
+        vo_cv.notify_all();
+    }
+
     void SignalVoLabel() {
         std::scoped_lock lk{vo_mutex};
         vo_cv.notify_one();

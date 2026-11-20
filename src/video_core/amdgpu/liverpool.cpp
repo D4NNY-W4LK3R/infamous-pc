@@ -10,6 +10,7 @@
 #include "common/sampling_profiler.h"
 #include "common/scope_exit.h"
 #include "common/thread.h"
+#include "common/tuning.h"
 #include "core/debug_state.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/process.h"
@@ -80,6 +81,10 @@ Liverpool::Liverpool() : guest_markers_enabled{EmulatorSettings.IsVkGuestMarkers
 Liverpool::~Liverpool() {
     process_thread.request_stop();
     process_thread.join();
+}
+
+void Liverpool::WakePresentationWaiter() {
+    vo_port->WakeVoWaiter();
 }
 
 void Liverpool::ProcessCommands() {
@@ -821,7 +826,21 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 // instead and allow other tasks to run.
                 if (vo_port->IsVoLabel(wait_addr) &&
                     num_submits == mapped_queues[GfxQueueId].submits.size()) {
-                    vo_port->WaitVoLabel([&] { return wait_reg_mem->Test(regs.reg_array); });
+                    static const bool wake_for_commands = Common::Tune("SS_WAKE_FOR_COPIES", 1) != 0;
+                    if (!wake_for_commands) {
+                        vo_port->WaitVoLabel([&] { return wait_reg_mem->Test(regs.reg_array); });
+                        ++sync_count;
+                        break;
+                    }
+                    // Game threads asking for copies back meanwhile are taken up at once, as they
+                    // are between packets, instead of once the frame is presented.
+                    in_presentation_wait.store(true);
+                    while (!vo_port->WaitVoLabelOr(
+                        [&] { return wait_reg_mem->Test(regs.reg_array); },
+                        [&] { return num_commands.load() != 0; })) {
+                        ProcessCommands();
+                    }
+                    in_presentation_wait.store(false);
                     ++sync_count;
                     break;
                 }

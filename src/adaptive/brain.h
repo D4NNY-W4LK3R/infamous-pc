@@ -153,6 +153,15 @@ struct SceneStats {
     std::array<double, NumStallKinds> freeze_stall_ms{}; ///< the stalls of seconds with a freeze
 };
 
+/// Gameplay seconds under or at the frame-rate target, and where their frame time went: the
+/// graphics card, the emulator's GPU thread, or the game's own threads waiting (build 35).
+struct LimitStats {
+    std::uint32_t seconds = 0;
+    double frames = 0.0;
+    double card_ms = 0.0; ///< graphics card busy, summed over the frames
+    std::array<double, NumStallKinds> stall_ms{};
+};
+
 struct StartupResult {
     LoadStatus load_status = LoadStatus::Fresh;
     /// Performance mode for this launch chosen by the fps-target controller (-1: not in use).
@@ -339,6 +348,11 @@ private:
     Scene last_scene = Scene::Unknown;
     std::array<SceneStats, NumScenes> scene_stats{};
     std::vector<double> gameplay_gpu_busy; ///< per-second host GPU ms in gameplay (capped)
+    std::array<LimitStats, 2> gameplay_limits{}; ///< [0] under the target, [1] at it
+    /// The frame rate gameplay seconds are held to: the fps target, or 30 (the game's own cap).
+    std::uint32_t LimitTargetFps() const {
+        return config.fps_target > 0 ? config.fps_target : 30;
+    }
     std::deque<SceneSwitch> switches;      ///< newest last, capped
     std::int32_t launch_perf_mode = -1;    ///< chosen by the fps-target controller
     std::vector<QualityStep> quality_ladder; ///< this launch's steps (empty: target off)

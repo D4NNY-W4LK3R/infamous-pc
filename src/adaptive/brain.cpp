@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <initializer_list>
 #include <cmath>
 #include <chrono>
 #include <cstdio>
@@ -565,6 +566,15 @@ void CentralBrain::ClassifySeconds() {
         }
         if (s.frames >= 10 && st.medians.size() < 7200) {
             st.medians.push_back(s.median_ms);
+        }
+        if (scene == Scene::Gameplay && s.frames >= 5) {
+            auto& limit = gameplay_limits[s.frames + 1 < LimitTargetFps() ? 0 : 1];
+            ++limit.seconds;
+            limit.frames += s.frames;
+            limit.card_ms += s.gpu_busy_median_ms * s.frames;
+            for (std::size_t k = 0; k < NumStallKinds; ++k) {
+                limit.stall_ms[k] += s.stall_ms[k];
+            }
         }
         if (scene == Scene::Gameplay && s.gpu_busy_median_ms > 0.0 &&
             gameplay_gpu_busy.size() < 7200) {
@@ -1727,6 +1737,66 @@ std::string FreezeCauses(const std::array<double, NumStallKinds>& stall_ms) {
 }
 } // namespace
 
+/// What held gameplay seconds under the frame-rate target: the graphics card, the emulator's GPU
+/// thread, or the game's own threads, waiting on memory it shares with the card or on shaders.
+/// A lower quality only helps in the first case; the player's sessions were in the last one, with
+/// the card busy half to three quarters of the frame (build 35).
+static std::string DescribeLimits(const std::array<LimitStats, 2>& limits, std::uint32_t target) {
+    std::ostringstream o;
+    o << "== What holds the frame rate back (gameplay, this launch)\n";
+    const std::uint32_t total = limits[0].seconds + limits[1].seconds;
+    if (total == 0) {
+        o << "  no gameplay measured\n";
+        return o.str();
+    }
+    o << "  " << limits[0].seconds << " of " << total << " seconds under " << target << " fps\n";
+    const auto stalls = [](const LimitStats& l, std::initializer_list<StallKind> kinds) {
+        double ms = 0.0;
+        for (const auto k : kinds) {
+            ms += l.stall_ms[static_cast<std::size_t>(k)];
+        }
+        return ms / std::max(l.frames, 1.0);
+    };
+    for (std::size_t i = 0; i < 2; ++i) {
+        const auto& l = limits[i];
+        if (l.seconds == 0) {
+            continue;
+        }
+        const double frame = 1000.0 * l.seconds / std::max(l.frames, 1.0);
+        const double card = l.card_ms / std::max(l.frames, 1.0);
+        const double thread =
+            std::max(stalls(l, {StallKind::GpuThread}) -
+                         stalls(l, {StallKind::GuestWait, StallKind::FrameWait}),
+                     0.0);
+        const double shared = stalls(l, {StallKind::PageFault, StallKind::ReadbackWait,
+                                         StallKind::BufferDownload, StallKind::PageProtect});
+        const double shaders = stalls(l, {StallKind::ShaderTranslate, StallKind::PipelineCreate,
+                                          StallKind::PipelineWait});
+        o << (i == 0 ? "  under " : "  at ") << target
+          << F(" fps: %.1f fps, %.1f ms a frame: ", 1000.0 / frame, frame);
+        if (card > 0.0) {
+            o << F("graphics card busy %.1f ms (%.0f%%), ", card, 100.0 * card / frame);
+        } else {
+            o << "graphics card not measured, ";
+        }
+        o << F("emulator GPU thread busy %.1f ms (%.0f%%); game threads waited %.1f ms on memory "
+               "shared with the card (page faults, copies back) and %.1f ms on shaders\n",
+               thread, 100.0 * thread / frame, shared, shaders);
+        if (i == 0) {
+            o << "  so the limit there is ";
+            if (card >= 0.9 * frame) {
+                o << "the graphics card: a smaller render size or lower quality helps\n";
+            } else if (thread >= 0.9 * frame) {
+                o << "the emulator's GPU thread: lower quality (fewer draws) helps a little\n";
+            } else {
+                o << "the game's own threads: the card and the emulator's GPU thread had time to "
+                     "spare, so lower quality does not help; the waits above are what to cut\n";
+            }
+        }
+    }
+    return o.str();
+}
+
 /// Freezes (frames of 100 ms or more) per scene: how many, the time lost per 10 minutes, what
 /// it went to. Shows whether they shrink as the shader cache fills (build 34).
 static std::string DescribeFreezes(const std::array<SceneStats, NumScenes>& scenes) {
@@ -1895,7 +1965,10 @@ std::string CentralBrain::BuildReport() const {
         o << F("  graphics card busy in gameplay: %.1f ms a frame (median)\n",
                Stats::Percentile(gameplay_gpu_busy, 0.5));
     }
-    o << '\n' << DescribeFreezes(scene_stats) << '\n' << DescribeSwitches(switches);
+    o << '\n'
+      << DescribeLimits(gameplay_limits, LimitTargetFps()) << '\n'
+      << DescribeFreezes(scene_stats) << '\n'
+      << DescribeSwitches(switches);
     if (!perf_mode_decision.empty()) {
         o << "\n== Frame-rate target\n  " << perf_mode_decision << '\n';
     }
