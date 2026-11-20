@@ -11,6 +11,7 @@
 #include <stb_image.h>
 
 #include "adaptive/emulator_glue.h"
+#include "common/startup_progress.h"
 #include "common/assert.h"
 #include "common/elf_info.h"
 #include "common/io_file.h"
@@ -108,6 +109,11 @@ static Uint32 SDLCALL PollControllerLightColour(void* userdata, SDL_TimerID time
     return interval;
 }
 
+namespace {
+SDL_Window* g_progress_window = nullptr; ///< for the start-up progress hook
+std::string g_progress_title;
+} // namespace
+
 WindowSDL::WindowSDL(s32 width_, s32 height_, Input::GameControllers* controllers_,
                      std::string_view window_title)
     : width{width_}, height{height_}, controllers{*controllers_} {
@@ -141,6 +147,19 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, Input::GameControllers* controller
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN,
                            EmulatorSettings.IsFullScreen());
     window = SDL_CreateWindowWithProperties(props);
+    // Shader preload progress in the title, and Windows messages handled meanwhile (the preload
+    // runs on this thread before the event loop starts).
+    g_progress_window = window;
+    g_progress_title = std::string{window_title};
+    Common::SetStartupProgressHook([](const std::string& text) {
+        if (g_progress_window == nullptr) {
+            return;
+        }
+        const std::string title =
+            text.empty() ? g_progress_title : g_progress_title + " - " + text;
+        SDL_SetWindowTitle(g_progress_window, title.c_str());
+        SDL_PumpEvents();
+    });
     SDL_DestroyProperties(props);
     if (window == nullptr) {
         UNREACHABLE_MSG("Failed to create window handle: {}", SDL_GetError());

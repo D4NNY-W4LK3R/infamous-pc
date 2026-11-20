@@ -148,6 +148,9 @@ struct SceneSwitch {
 struct SceneStats {
     std::uint32_t seconds = 0;
     std::vector<double> medians; ///< capped
+    std::uint32_t freezes = 0;   ///< frames of 100 ms or more
+    double frozen_ms = 0.0;      ///< their time beyond the usual frame
+    std::array<double, NumStallKinds> freeze_stall_ms{}; ///< the stalls of seconds with a freeze
 };
 
 struct StartupResult {

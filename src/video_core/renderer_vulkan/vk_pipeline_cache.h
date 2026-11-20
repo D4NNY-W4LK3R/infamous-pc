@@ -153,6 +153,8 @@ public:
     ~PipelineCache();
 
     void WarmUp();
+    /// The preload gave up waiting (no progress for 45 s): the next start sets the driver cache aside.
+    bool warm_up_stalled = false;
     void Sync();
     bool SaveDriverCache();
 

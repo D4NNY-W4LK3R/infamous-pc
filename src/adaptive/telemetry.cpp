@@ -83,6 +83,10 @@ void TelemetryWindow::CloseSecond() {
         if (v >= HitchFloorMs && v >= 2.0 * s.median_ms) {
             ++s.hitches;
         }
+        if (v >= 100.0) {
+            ++s.freezes;
+            s.frozen_ms += v - s.median_ms;
+        }
     }
     seconds.push_back(s);
     while (seconds.size() > MaxSeconds) {

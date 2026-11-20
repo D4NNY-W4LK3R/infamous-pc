@@ -56,6 +56,9 @@ struct SecondSummary {
     /// Identifies a still picture across seconds and launches (0 = not a still picture).
     std::uint64_t signature = 0;
     double gpu_busy_median_ms = 0.0;
+    /// Frames of 100 ms or more, and the time they took beyond the second's median frame.
+    std::uint32_t freezes = 0;
+    double frozen_ms = 0.0;
 };
 
 /// Keeps a rolling window of frames and per-second summaries and builds Snapshots from them.

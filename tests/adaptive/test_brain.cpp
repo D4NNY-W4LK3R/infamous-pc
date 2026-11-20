@@ -930,3 +930,28 @@ TEST(Brain, FrameRateTargetIsOffUnlessThePlayerAllowsIt) {
     EXPECT_EQ(rig.Start().perf_mode, -1);
     rig.brain->Shutdown();
 }
+
+TEST(Brain, ReportCountsFreezesPerScene) {
+    const auto dir = TempDir("freezes");
+    World w;
+    w.draws = Moving;
+    w.input = true;
+    int frame = 0;
+    // A 400 ms frame every 300 frames (about every 10 s) during gameplay.
+    w.spike = [&frame](World&) { return (++frame % 300 == 0) ? 400.0 : 0.0; };
+    Rig rig(w, dir, Mode::Observe);
+    rig.Start();
+    w.Seconds(*rig.brain, 120);
+    const auto path = rig.brain->Shutdown();
+    ASSERT_FALSE(path.empty());
+    std::ifstream in{path};
+    std::stringstream ss;
+    ss << in.rdbuf();
+    const std::string report = ss.str();
+    const auto at = report.find("== Freezes");
+    ASSERT_NE(at, std::string::npos);
+    const std::string section = report.substr(at, report.find("== Scene switches") - at);
+    EXPECT_NE(section.find("gameplay: "), std::string::npos) << section;
+    EXPECT_EQ(section.find("gameplay: 0 freezes"), std::string::npos) << section;
+    EXPECT_NE(section.find("per 10 minutes"), std::string::npos) << section;
+}

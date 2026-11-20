@@ -1,8 +1,11 @@
 // SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <thread>
+#include <chrono>
 #include <string_view>
 
+#include "common/startup_progress.h"
 #include "common/serdes.h"
 #include "core/emulator_settings.h"
 #include "shader_recompiler/frontend/fetch_shader.h"
@@ -407,11 +410,52 @@ void PipelineCache::WarmUp() {
             }
         });
 
-    for (const auto& [_, pipeline] : compute_pipelines) {
-        pipeline->WaitReady();
-    }
-    for (const auto& [_, pipeline] : graphics_pipelines) {
-        pipeline->WaitReady();
+    // Wait for them with progress in the window title (Common::ReportStartupProgress), and give
+    // up waiting when none finishes for a long time: twice a start stopped here for good with a
+    // driver pipeline cache over 100 MB (build 28, 32). The game then starts anyway, the rest
+    // compiles on, and the marker stays so the next start sets the driver cache aside.
+    {
+        using Clock = std::chrono::steady_clock;
+        const auto stall_limit = std::chrono::seconds(45);
+        const std::size_t total = compute_pipelines.size() + graphics_pipelines.size();
+        std::size_t ready = 0;
+        std::size_t last_ready = static_cast<std::size_t>(-1);
+        auto last_progress = Clock::now();
+        auto last_report = Clock::now() - std::chrono::seconds(10);
+        while (true) {
+            ready = 0;
+            for (const auto& [_, pipeline] : compute_pipelines) {
+                ready += pipeline->IsReady() ? 1 : 0;
+            }
+            for (const auto& [_, pipeline] : graphics_pipelines) {
+                ready += pipeline->IsReady() ? 1 : 0;
+            }
+            const auto now = Clock::now();
+            if (ready != last_ready) {
+                last_ready = ready;
+                last_progress = now;
+            }
+            if (ready >= total) {
+                break;
+            }
+            if (now - last_report >= std::chrono::seconds(1)) {
+                last_report = now;
+                Common::ReportStartupProgress(
+                    fmt::format("loading shaders {} of {} ({}%)", ready, total,
+                                total ? ready * 100 / total : 100));
+            }
+            if (now - last_progress >= stall_limit) {
+                warm_up_stalled = true;
+                LOG_ERROR(Render,
+                          "Shader preload stopped making progress at {} of {} for {} s: the game "
+                          "starts anyway; the driver's pipeline cache is set aside at the next "
+                          "start",
+                          ready, total, stall_limit.count());
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        Common::ReportStartupProgress({});
     }
 
     LOG_INFO(Render, "Preloaded {} pipelines (all compiled and resident in VRAM)", num_pipelines);

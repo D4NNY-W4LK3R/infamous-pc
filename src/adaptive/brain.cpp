@@ -556,6 +556,13 @@ void CentralBrain::ClassifySeconds() {
         }
         auto& st = scene_stats[static_cast<std::size_t>(scene)];
         ++st.seconds;
+        if (s.freezes > 0) {
+            st.freezes += s.freezes;
+            st.frozen_ms += s.frozen_ms;
+            for (std::size_t k = 0; k < NumStallKinds; ++k) {
+                st.freeze_stall_ms[k] += s.stall_ms[k];
+            }
+        }
         if (s.frames >= 10 && st.medians.size() < 7200) {
             st.medians.push_back(s.median_ms);
         }
@@ -1676,19 +1683,14 @@ std::filesystem::path CentralBrain::Shutdown(bool crashed) {
     return out ? path : std::filesystem::path{};
 }
 
-static std::string DescribeSwitches(const std::deque<SceneSwitch>& switches) {
-    std::ostringstream o;
-    o << "== Scene switches\n";
-    if (switches.empty()) {
-        o << "  none\n";
-        return o.str();
-    }
-    // Where the time of the freezes went, in groups a player can act on.
-    struct Group {
-        const char* name;
-        std::vector<StallKind> kinds;
-    };
-    const std::vector<Group> groups = {
+namespace {
+// Where the time of freezes went, in groups a player can act on.
+struct FreezeGroup {
+    const char* name;
+    std::vector<StallKind> kinds;
+};
+const std::vector<FreezeGroup>& FreezeGroups() {
+    static const std::vector<FreezeGroup> groups = {
         {"shader compiling",
          {StallKind::ShaderTranslate, StallKind::PipelineCreate, StallKind::PipelineWait}},
         {"loading data to the graphics card",
@@ -1699,6 +1701,70 @@ static std::string DescribeSwitches(const std::deque<SceneSwitch>& switches) {
           StallKind::ReadbackWait, StallKind::BufferDownload}},
         {"graphics card busy", {StallKind::GpuWait}},
     };
+    return groups;
+}
+
+std::string FreezeCauses(const std::array<double, NumStallKinds>& stall_ms) {
+    const auto& groups = FreezeGroups();
+    std::vector<double> group_ms(groups.size(), 0.0);
+    double total = 0.0;
+    for (std::size_t g = 0; g < groups.size(); ++g) {
+        for (const auto k : groups[g].kinds) {
+            group_ms[g] += stall_ms[static_cast<std::size_t>(k)];
+        }
+        total += group_ms[g];
+    }
+    std::string out;
+    for (std::size_t g = 0; total > 0.0 && g < groups.size(); ++g) {
+        if (group_ms[g] > 0.0) {
+            char buf[96];
+            std::snprintf(buf, sizeof(buf), " %s %.0f%%;", groups[g].name,
+                          100.0 * group_ms[g] / total);
+            out += buf;
+        }
+    }
+    return out;
+}
+} // namespace
+
+/// Freezes (frames of 100 ms or more) per scene: how many, the time lost per 10 minutes, what
+/// it went to. Shows whether they shrink as the shader cache fills (build 34).
+static std::string DescribeFreezes(const std::array<SceneStats, NumScenes>& scenes) {
+    std::ostringstream o;
+    o << "== Freezes (frames of 100 ms or more, this launch)\n";
+    bool any = false;
+    std::array<double, NumStallKinds> all{};
+    for (std::size_t i = 0; i < NumScenes; ++i) {
+        const auto& st = scenes[i];
+        if (st.seconds == 0 || static_cast<Scene>(i) == Scene::Loading) {
+            continue;
+        }
+        any = true;
+        o << "  " << ToString(static_cast<Scene>(i)) << ": " << st.freezes
+          << F(" freezes, %.1f s lost (%.1f s per 10 minutes)\n", st.frozen_ms / 1000.0,
+               st.frozen_ms / 1000.0 * 600.0 / st.seconds);
+        for (std::size_t k = 0; k < NumStallKinds; ++k) {
+            all[k] += st.freeze_stall_ms[k];
+        }
+    }
+    if (!any) {
+        o << "  none measured\n";
+    }
+    const std::string causes = FreezeCauses(all);
+    if (!causes.empty()) {
+        o << "  the time went to:" << causes << '\n';
+    }
+    return o.str();
+}
+
+static std::string DescribeSwitches(const std::deque<SceneSwitch>& switches) {
+    std::ostringstream o;
+    o << "== Scene switches\n";
+    if (switches.empty()) {
+        o << "  none\n";
+        return o.str();
+    }
+    const auto& groups = FreezeGroups();
     std::size_t freezes = 0;
     double worst = 0.0;
     std::vector<double> group_ms(groups.size(), 0.0);
@@ -1829,7 +1895,7 @@ std::string CentralBrain::BuildReport() const {
         o << F("  graphics card busy in gameplay: %.1f ms a frame (median)\n",
                Stats::Percentile(gameplay_gpu_busy, 0.5));
     }
-    o << '\n' << DescribeSwitches(switches);
+    o << '\n' << DescribeFreezes(scene_stats) << '\n' << DescribeSwitches(switches);
     if (!perf_mode_decision.empty()) {
         o << "\n== Frame-rate target\n  " << perf_mode_decision << '\n';
     }

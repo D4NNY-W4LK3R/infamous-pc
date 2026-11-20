@@ -87,6 +87,12 @@ THE OPTIMIZER (F1)
   cutscene or the menu pauses it, and quitting keeps its seconds for the next session.
   Scene switches (gameplay <-> cutscene, loading) are measured: the report lists the freezes
   and what they were spent on (shader compiling, loading data, shared memory, the card).
+  Starting: the shaders you have met so far are loaded before the game starts, with the
+  progress in the window title ("loading shaders 2100 of 6918"). That can take a minute or two
+  after the driver's own cache was reset - let it finish; nothing has to be renamed. Since
+  build 34 the driver's cache is kept under 64 MB (two starts froze on bigger ones), and a
+  start whose loading stops for 45 s goes on by itself and sets that cache aside next time.
+  The report's "Freezes" section shows the time lost to freezes per 10 minutes of play.
   SS_FAST_FIRST_COMPILE=1 builds an effect shader the game needs right now without the
   driver's optimizations first (the optimized one replaces it). Off by default: on a GTX 1650
   those builds were slower, not quicker.

@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <utility>
+#include <cstdlib>
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -332,6 +334,23 @@ std::filesystem::path DriverCachePath(const Instance& instance) {
 /// warm-up froze or crashed last time: in inFAMOUS Second Son a driver cache saved during a session
 /// that did not end cleanly froze every later start in the warm-up until the player moved it
 /// aside (build 28). The driver cache only saves the driver work, so it is set aside then.
+/// The largest driver pipeline cache saved or loaded (SS_DRIVER_CACHE_MAX_MB, default 64): on a
+/// GTX 1650 (driver 616.56) a start froze in the shader preload with a 106 MB and a 119 MB one,
+/// and went through with 70 MB and with none.
+std::uintmax_t MaxDriverCacheBytes() {
+    static const std::uintmax_t bytes = [] {
+        std::uintmax_t mb = 64;
+        if (const char* v = std::getenv("SS_DRIVER_CACHE_MAX_MB")) {
+            const long n = std::atol(v);
+            if (n >= 8 && n <= 4096) {
+                mb = static_cast<std::uintmax_t>(n);
+            }
+        }
+        return mb << 20;
+    }();
+    return bytes;
+}
+
 std::filesystem::path WarmUpMarkerPath(const Instance& instance) {
     auto path = DriverCachePath(instance);
     path += ".warming";
@@ -356,6 +375,18 @@ std::vector<u8> LoadDriverCacheBlob(const Instance& instance) {
         }
     }
     if (!std::filesystem::exists(path)) {
+        return {};
+    }
+    if (const auto size = std::filesystem::file_size(path, ec);
+        !ec && size > MaxDriverCacheBytes()) {
+        auto aside = path;
+        aside += ".big";
+        std::filesystem::remove(aside, ec);
+        std::filesystem::rename(path, aside, ec);
+        LOG_WARNING(Render_Vulkan,
+                    "The driver's pipeline cache is {} MB, over the {} MB this build loads (two "
+                    "starts froze loading one over 100 MB): set aside and rebuilt",
+                    size >> 20, MaxDriverCacheBytes() >> 20);
         return {};
     }
     IOFile file{path, FileAccessMode::Read};
@@ -460,7 +491,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         Common::FS::IOFile marker{WarmUpMarkerPath(instance), Common::FS::FileAccessMode::Create};
     }
     WarmUp();
-    {
+    if (!warm_up_stalled) {
         std::error_code ec;
         std::filesystem::remove(WarmUpMarkerPath(instance), ec);
     }
@@ -479,6 +510,17 @@ bool PipelineCache::SaveDriverCacheUnchecked() {
     }
     auto [res, blob] = instance.GetDevice().getPipelineCacheData(*pipeline_cache);
     if (res != vk::Result::eSuccess || blob.empty()) {
+        return false;
+    }
+    if (blob.size() > MaxDriverCacheBytes()) {
+        // Keep the last one under the cap rather than one a later start may freeze on.
+        static bool told = false;
+        if (!std::exchange(told, true)) {
+            LOG_INFO(Render_Vulkan,
+                     "Driver VkPipelineCache reached {} MB: not saved beyond {} MB (the saved "
+                     "one stays)",
+                     blob.size() >> 20, MaxDriverCacheBytes() >> 20);
+        }
         return false;
     }
     const u64 h = std::hash<std::string_view>{}(
