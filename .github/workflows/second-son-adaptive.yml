@@ -150,6 +150,8 @@ jobs:
           Copy-Item build/shadPS4.exe $pkg/
           if (Test-Path dist/second-son-adaptive) { Copy-Item -Recurse -Force dist/second-son-adaptive/* $pkg/ }
           Copy-Item out/SOURCE_PINS.txt $pkg/
+          # The build number (the run number, as in the release title): names the diagnostics zip.
+          "$env:GITHUB_RUN_NUMBER" | Out-File -Encoding ascii $pkg/BUILD.txt
           Copy-Item LICENSE $pkg/LICENSE.txt
           $hash = (Get-FileHash $pkg/shadPS4.exe -Algorithm SHA256).Hash
           "shadPS4.exe SHA256 $hash" | Out-File -Encoding ascii $pkg/SHA256.txt

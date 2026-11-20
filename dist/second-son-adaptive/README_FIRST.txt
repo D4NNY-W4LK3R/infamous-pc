@@ -29,6 +29,8 @@ CONTROLS (keyboard and mouse)
   P                    stencil art: the spray can is held on its side, which swaps up/down
                        and left/right of the mouse. P = sideways, P again = sideways the
                        other way (if up/down is reversed), P again = normal (graffiti).
+                       Since build 38 it goes back to normal by itself 2 s after the gameplay
+                       camera is back, so the next graffiti never starts sideways.
                        Where you aim up or down stays put for 5 s after you last moved
                        the mouse, also on ledges and rooftop edges where the game pulls
                        the camera back to level (SHADPS4_MOUSE_AIM_TILT_HOLD=0: off).
@@ -162,7 +164,13 @@ UPDATING TO A NEW BUILD - ONE DATA FOLDER FOR EVERY BUILD
   once instead of being forgotten.
 
 TROUBLESHOOTING
-  Run COLLECT_DIAGNOSTICS.cmd and look at / send diagnostics.zip.
+  Run COLLECT_DIAGNOSTICS.cmd (after closing the game, so its report is written) and look at /
+  send Build<number>_Diagnostics.zip (since build 38; diagnostics.zip before).
+  Experimental, build 38: F3 > "Run Compute Rings on a Second Queue" runs the game's compute
+  work beside the drawing, as the PS4 does (next launch). A launch with it on that does not end
+  cleanly turns it off again by itself. Build 38 also samples the game's main thread while the
+  spray can is out (stencil probe, SS_STENCIL_PROBE=0: off), to find how to tell stencil art
+  from other graffiti without P.
   Back to the plain 4 GB behaviour for one run: set SS_ADAPTIVE=0 and SHADPS4_MOUSE_AIM=0
   before starting, or use the original infamous-pc build - this build never touches its files.
 

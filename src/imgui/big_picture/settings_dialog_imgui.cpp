@@ -891,7 +891,8 @@ void SettingsWindow::DrawSettingsTable(SettingsCategory category) {
             AddSettingCheckbox("Copy Uploads on a Separate Thread", uploadThreadSetting);
             AddSettingCheckbox("Upload Large Buffers Once Between Waits",
                                syncLargeReadsOnceSetting);
-            AddSettingCheckbox("Run Compute Rings on a Second Queue (Experimental)",
+            AddSettingCheckbox("Run Compute Rings on a Second Queue (Experimental, Requires "
+                               "Restart; Turned Off Again After a Launch That Crashes)",
                                asyncComputeSetting);
             AddSettingCheckbox("Enable Shader Cache", pipelineCacheEnabledSetting);
             if (pipelineCacheEnabledSetting) {

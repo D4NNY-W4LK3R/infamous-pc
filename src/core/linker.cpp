@@ -27,6 +27,7 @@
 #include "core/linker.h"
 #include "core/memory.h"
 #include "core/mouse_aim.h"
+#include "core/stencil_probe.h"
 #include "core/second_son_patches.h"
 #include "core/tls.h"
 #include "ipc/ipc.h"
@@ -210,6 +211,7 @@ void Linker::Execute(const std::vector<std::string>& args) {
         // Native mouse camera: the hook goes into the eboot before its entry runs, and only if
         // the eboot is a build whose camera code and data offsets were measured (mouse_aim.cpp).
         Core::MouseAim::InstallCameraHook(module->GetBaseAddress(), module->aligned_base_size);
+        Core::StencilProbe::SetGameCode(module->GetBaseAddress(), module->aligned_base_size);
         // Second Son (update 01.07) game patches from the v1.1.1 fork, byte-checked first.
         {
             const auto g = Adaptive::Glue::GamePatches();

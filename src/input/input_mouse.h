@@ -72,6 +72,11 @@ bool TouchGripActive();
 /// moved the spray sideways (player report, build 28). P cycles through the three.
 enum class SprayHold : u8 { Normal, Sideways, SidewaysOtherWay };
 SprayHold CycleSprayHold();
+SprayHold CurrentSprayHold();
+/// The mouse turns the emulated motion sensor (Second Son with the camera hook idle: the spray
+/// can, menus, cut-scenes), and how long ago it last moved there.
+bool MouseTurnsMotionSensor();
+u64 MsSinceMouseMotion();
 /// The motion sensor's rotation rates (rad/s-ish units of the emulation) for a mouse movement.
 void MouseToRotation(SprayHold hold, float d_x, float d_y, float out[3]);
 

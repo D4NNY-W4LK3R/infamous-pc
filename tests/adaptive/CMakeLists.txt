@@ -77,6 +77,7 @@ add_executable(adaptive_tests
     test_second_son_patches.cpp
     test_shared_user_dir.cpp
     test_touch_grip.cpp
+    test_stencil_probe.cpp
     test_camera_signature.cpp
     test_camera_cave.cpp
     test_quality_ladder.cpp

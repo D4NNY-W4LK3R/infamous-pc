@@ -964,6 +964,8 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/mouse_aim.cpp
          src/core/mouse_aim_cave.h
          src/core/mouse_aim.h
+         src/core/stencil_probe.cpp
+         src/core/stencil_probe.h
          src/core/linker.h
          src/core/memory.cpp
          src/core/memory.h

@@ -7,6 +7,7 @@
 #include "core/emulator_settings.h"
 #include "core/libraries/libs.h"
 #include "core/libraries/pad/pad_errors.h"
+#include "core/stencil_probe.h"
 #include "core/user_settings.h"
 #include "imgui/renderer/imgui_core.h"
 #include "input/controller.h"
@@ -441,6 +442,7 @@ int ProcessStates(OrbisPadData* pData, const Input::State* states, s32 num) {
 
 int PS4_SYSV_ABI scePadRead(s32 handle, OrbisPadData* pData, s32 num) {
     LOG_TRACE(Lib_Pad, "called");
+    Core::StencilProbe::NoteGameThread();
     if (pData == nullptr || num < 1 || num > ORBIS_PAD_MAX_DATA_NUM) {
         return ORBIS_PAD_ERROR_INVALID_ARG;
     }

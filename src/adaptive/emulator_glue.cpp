@@ -224,6 +224,28 @@ void Startup(const std::string& game_serial, const std::string& app_version,
             }
         }
     }
+    // The same for the game's compute work on a second queue (F3, experimental): a launch with it
+    // on that did not end cleanly turns it off, so a hang it may cause is never repeated unasked.
+    {
+        const auto marker = g_dir / "async-compute-active.txt";
+        if (std::filesystem::exists(marker, ec)) {
+            std::filesystem::remove(marker, ec);
+            if (EmulatorSettings.IsAsyncCompute()) {
+                EmulatorSettings.SetAsyncCompute(false, true);
+                EmulatorSettings.Save(game_serial);
+                Overlay::Notice::Show("The last launch did not end cleanly with the compute work "
+                                      "on a second queue - it is off now (F3 to turn it back on)",
+                                      8.0);
+                LOG_WARNING(Render, "The last launch did not end cleanly with compute rings on a "
+                                    "second queue; it is turned off for this game (F3)");
+            }
+        }
+        if (EmulatorSettings.IsAsyncCompute()) {
+            std::ofstream(marker) << "compute rings on a second queue were on in this launch\n";
+            LOG_INFO(Render, "Compute rings run on a second queue (experimental): a launch that "
+                             "does not end cleanly turns this off");
+        }
+    }
     // The frame rate limit is the user's, not the optimizer's: it applies even when the
     // optimizer is turned off.
     Common::FrameLimit::Set(g_settings.frame_limit);
@@ -379,6 +401,7 @@ void Shutdown() {
     if (!g_crashed.load(std::memory_order_relaxed) && !g_dir.empty()) {
         std::error_code ec;
         std::filesystem::remove(g_dir / "late-read-active.txt", ec);
+        std::filesystem::remove(g_dir / "async-compute-active.txt", ec);
     }
     if (!g_brain) {
         return;

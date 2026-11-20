@@ -80,7 +80,31 @@ void SetMouseGyroRollMode(bool mode) {
 
 namespace {
 std::atomic<SprayHold> g_spray_hold{SprayHold::Normal};
+std::atomic<bool> g_motion_from_mouse_seen{false};
+std::atomic<s64> g_last_mouse_motion_ms{0};
+/// Since when the gameplay camera has been running the hook, for putting the spray can back
+/// upright once the player is back in gameplay (0 = not running).
+s64 g_camera_live_since_ms = 0;
+
+s64 NowMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
 } // namespace
+
+SprayHold CurrentSprayHold() {
+    return g_spray_hold.load(std::memory_order_relaxed);
+}
+
+bool MouseTurnsMotionSensor() {
+    return g_motion_from_mouse_seen.load(std::memory_order_relaxed);
+}
+
+u64 MsSinceMouseMotion() {
+    const s64 last = g_last_mouse_motion_ms.load(std::memory_order_relaxed);
+    return last == 0 ? ~u64{0} : static_cast<u64>(std::max<s64>(NowMs() - last, 0));
+}
 
 SprayHold CycleSprayHold() {
     const auto next = static_cast<SprayHold>((static_cast<int>(g_spray_hold.load()) + 1) % 3);
@@ -123,6 +147,17 @@ void EmulateJoystick(GameController* controller, u32 interval) {
     if (second_son && mouse_joystick_binding != 1) {
         const bool hook_drives_camera = Core::MouseAim::Installed() && Core::MouseAim::CameraLive();
         if (hook_drives_camera) {
+            // Back in gameplay for 2 s: the spray can is held upright again, so the next
+            // graffiti does not start sideways after stencil art (P only for stencil art).
+            const s64 now = NowMs();
+            if (g_camera_live_since_ms == 0) {
+                g_camera_live_since_ms = now;
+            } else if (now - g_camera_live_since_ms >= 2000 &&
+                       g_spray_hold.load(std::memory_order_relaxed) != SprayHold::Normal) {
+                g_spray_hold.store(SprayHold::Normal);
+                LOG_INFO(Input, "Spray can held upright again (back in gameplay)");
+            }
+            g_motion_from_mouse_seen.store(false, std::memory_order_relaxed);
             if (motion_from_mouse) {
                 constexpr float no_rotation[3] = {0.0f, 0.0f, 0.0f};
                 controller->SetEmulatedRotationRate(no_rotation);
@@ -132,10 +167,15 @@ void EmulateJoystick(GameController* controller, u32 interval) {
             }
             return;
         }
+        g_camera_live_since_ms = 0;
         float gyro_from_mouse[3];
         MouseToRotation(g_spray_hold.load(std::memory_order_relaxed), d_x, d_y, gyro_from_mouse);
         controller->SetEmulatedRotationRate(gyro_from_mouse);
         motion_from_mouse = true;
+        g_motion_from_mouse_seen.store(true, std::memory_order_relaxed);
+        if (d_x != 0 || d_y != 0) {
+            g_last_mouse_motion_ms.store(NowMs(), std::memory_order_relaxed);
+        }
     }
 
     Axis axis_x, axis_y;
