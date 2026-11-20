@@ -334,12 +334,14 @@ std::filesystem::path DriverCachePath(const Instance& instance) {
 /// warm-up froze or crashed last time: in inFAMOUS Second Son a driver cache saved during a session
 /// that did not end cleanly froze every later start in the warm-up until the player moved it
 /// aside (build 28). The driver cache only saves the driver work, so it is set aside then.
-/// The largest driver pipeline cache saved or loaded (SS_DRIVER_CACHE_MAX_MB, default 64): on a
+/// The largest driver pipeline cache saved or loaded (SS_DRIVER_CACHE_MAX_MB, default 96): on a
 /// GTX 1650 (driver 616.56) a start froze in the shader preload with a 106 MB and a 119 MB one,
-/// and went through with 70 MB and with none.
+/// and went through with 67 MB, 70 MB and with none. Build 34 capped it at 64 MB, which set the
+/// player's 67 MB one aside: the next start compiled all 4275 pipelines anew for 8 minutes and
+/// could not save the result either. A start that stalls is caught by the preload's watchdog.
 std::uintmax_t MaxDriverCacheBytes() {
     static const std::uintmax_t bytes = [] {
-        std::uintmax_t mb = 64;
+        std::uintmax_t mb = 96;
         if (const char* v = std::getenv("SS_DRIVER_CACHE_MAX_MB")) {
             const long n = std::atol(v);
             if (n >= 8 && n <= 4096) {
@@ -374,8 +376,23 @@ std::vector<u8> LoadDriverCacheBlob(const Instance& instance) {
             return {};
         }
     }
-    if (!std::filesystem::exists(path)) {
-        return {};
+    if (!std::filesystem::exists(path, ec)) {
+        // One set aside only for its size, by an earlier build with a lower cap, is used again
+        // once it fits.
+        auto big = path;
+        big += ".big";
+        const auto size = std::filesystem::file_size(big, ec);
+        if (ec || size > MaxDriverCacheBytes()) {
+            return {};
+        }
+        std::filesystem::rename(big, path, ec);
+        if (ec) {
+            return {};
+        }
+        LOG_INFO(Render_Vulkan,
+                 "The driver's pipeline cache set aside for its size ({} MB) fits under the {} MB "
+                 "cap: used again",
+                 size >> 20, MaxDriverCacheBytes() >> 20);
     }
     if (const auto size = std::filesystem::file_size(path, ec);
         !ec && size > MaxDriverCacheBytes()) {
@@ -516,10 +533,12 @@ bool PipelineCache::SaveDriverCacheUnchecked() {
         // Keep the last one under the cap rather than one a later start may freeze on.
         static bool told = false;
         if (!std::exchange(told, true)) {
+            std::error_code ec;
+            const bool saved = std::filesystem::exists(DriverCachePath(instance), ec);
             LOG_INFO(Render_Vulkan,
-                     "Driver VkPipelineCache reached {} MB: not saved beyond {} MB (the saved "
-                     "one stays)",
-                     blob.size() >> 20, MaxDriverCacheBytes() >> 20);
+                     "Driver VkPipelineCache reached {} MB: not saved beyond {} MB ({})",
+                     blob.size() >> 20, MaxDriverCacheBytes() >> 20,
+                     saved ? "the saved one stays" : "none is saved; SS_DRIVER_CACHE_MAX_MB raises it");
         }
         return false;
     }

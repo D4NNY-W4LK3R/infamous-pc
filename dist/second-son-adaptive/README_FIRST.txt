@@ -90,7 +90,7 @@ THE OPTIMIZER (F1)
   Starting: the shaders you have met so far are loaded before the game starts, with the
   progress in the window title ("loading shaders 2100 of 6918"). That can take a minute or two
   after the driver's own cache was reset - let it finish; nothing has to be renamed. Since
-  build 34 the driver's cache is kept under 64 MB (two starts froze on bigger ones), and a
+  build 37 the driver's cache is kept under 96 MB (starts froze on 106 and 119 MB ones), and a
   start whose loading stops for 45 s goes on by itself and sets that cache aside next time.
   The report's "Freezes" section shows the time lost to freezes per 10 minutes of play.
   The report's "What holds the frame rate back" section shows, for the seconds of play under
