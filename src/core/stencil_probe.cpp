@@ -4,6 +4,7 @@
 #include "core/stencil_probe.h"
 
 #include <atomic>
+#include <functional>
 #include <cstdlib>
 #include <string>
 
@@ -231,6 +232,37 @@ void Report() {
         }
         LOG_INFO(Core, "Stencil probe: only with the {}: {}", BucketNames[bucket],
                  text.empty() ? std::string{"nothing yet"} : text);
+    }
+    // The most frequent addresses with each spray can hold and their shares in all three, to
+    // see by hand what tells them apart when the filter above finds nothing (the holds overlap
+    // when stencil art was painted upright or graffiti sideways).
+    for (const std::size_t bucket : {std::size_t{1}, std::size_t{2}}) {
+        if (samples[bucket] < 500) {
+            continue;
+        }
+        std::vector<std::pair<u32, u64>> top;
+        for (const auto& [offset, count] : counts[bucket]) {
+            top.emplace_back(count, offset);
+        }
+        const std::size_t n = std::min<std::size_t>(top.size(), 40);
+        std::partial_sort(top.begin(), top.begin() + n, top.end(), std::greater<>{});
+        std::string text;
+        for (std::size_t i = 0; i < n; ++i) {
+            const u64 offset = top[i].second;
+            const auto share = [&](std::size_t b) {
+                if (samples[b] == 0) {
+                    return 0.0;
+                }
+                const auto it = counts[b].find(offset);
+                return it == counts[b].end() ? 0.0 : 100.0 * it->second / samples[b];
+            };
+            text += fmt::format("{}{:#x} {:.0f}/{:.0f}/{:.0f}", text.empty() ? "" : ", ", offset,
+                                share(0), share(1), share(2));
+        }
+        LOG_INFO(Core,
+                 "Stencil probe: most frequent with the {} (% of gameplay / upright / sideways "
+                 "samples): {}",
+                 BucketNames[bucket], text);
     }
 #endif
 }

@@ -174,8 +174,12 @@ TROUBLESHOOTING
   Build 41: the log gets a "VRAM:" line every 30 s - what the emulator holds in video memory,
   how much of this process Windows keeps in shared system memory, and how busy the card's 3D,
   copy and compute engines were (the copy engine is what Windows moves memory with).
-  Experimental, build 41: F3 > Graphics > "VRAM Priorities" tells the driver to keep buffers
-  and images drawn to in video memory first and move textures out first (next launch). Build 38 also samples the game's main thread while the
+  VRAM priorities (build 41) made a GTX 1650 slower (17.3 against 29.9 fps): since build 43
+  only SS_VRAM_PRIORITIES=1 turns them on. Build 43 also logs, for the large ranges the game
+  reads (two texel buffers over 3 GB of its memory, all of it kept in video memory), how much
+  holds only zeros - memory that would not need to be in video memory.
+  Shake (T): since build 43 along the controller's own up, so mouse aiming no longer turns it
+  into a sideways motion the game does not count. Build 38 also samples the game's main thread while the
   spray can is out (stencil probe, SS_STENCIL_PROBE=0: off), to find how to tell stencil art
   from other graffiti without P.
   Back to the plain 4 GB behaviour for one run: set SS_ADAPTIVE=0 and SHADPS4_MOUSE_AIM=0

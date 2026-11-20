@@ -1027,6 +1027,9 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
                             ? !is_texel_buffer && !copied_back &&
                                   memory_tracker->IsRegionMarkedGpuWritten(device_addr, size)
                             : size >= LARGE_READ_THRESHOLD && LargeReadSynced(device_addr, size);
+    if (!is_written && size >= 256_MB) {
+        NoteLargeRead(device_addr, size);
+    }
     if (!synced) {
         // Also copies in an image the texel buffer aliases, so that isn't repeated here.
         SynchronizeMemory(arena, device_addr, size, is_written, is_texel_buffer);
@@ -1038,6 +1041,73 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         MarkGpuModifiedRange(device_addr, size);
     }
     return {arena, arena->Offset(device_addr)};
+}
+
+void BufferCache::NoteLargeRead(VAddr device_addr, u64 size) {
+    // 30 frames a second: about 5 minutes.
+    constexpr u64 RescanFrames = 9000;
+    const u64 frame = Common::Perf::FrameNumber();
+    {
+        std::scoped_lock lock{zero_scan_mutex};
+        for (auto& [range, scanned] : zero_scans) {
+            if (range == std::pair{device_addr, size}) {
+                if (frame - scanned < RescanFrames) {
+                    return;
+                }
+                scanned = frame;
+                goto scan;
+            }
+        }
+        if (zero_scans.size() >= 16) {
+            return;
+        }
+        zero_scans.push_back({{device_addr, size}, frame});
+    }
+scan:
+    if (zero_scan_running.exchange(true)) {
+        return;
+    }
+    if (zero_scan_thread.joinable()) {
+        zero_scan_thread.join();
+    }
+    zero_scan_thread = std::jthread{[this, device_addr, size](std::stop_token stop) {
+        constexpr u64 Block = 64_KB;
+        constexpr u64 Granule = RESIDENCY_GRANULE_SIZE;
+        constexpr u64 Chunk = 1_MB;
+        std::vector<u8> data(Chunk);
+        u64 zero_blocks = 0;
+        u64 zero_granules = 0;
+        bool granule_zero = true;
+        u64 scanned = 0;
+        for (u64 offset = 0; offset < size && !stop.stop_requested(); offset += Chunk) {
+            const u64 n = std::min(Chunk, size - offset);
+            memory->CopySparseMemory(device_addr + offset, data.data(), n);
+            for (u64 b = 0; b < n; b += Block) {
+                const u64* words = reinterpret_cast<const u64*>(data.data() + b);
+                const u64 count = std::min(Block, n - b) / 8;
+                const bool zero = std::all_of(words, words + count, [](u64 w) { return w == 0; });
+                zero_blocks += zero ? 1 : 0;
+                granule_zero = granule_zero && zero;
+                if ((device_addr + offset + b + Block) % Granule == 0) {
+                    zero_granules += granule_zero ? 1 : 0;
+                    granule_zero = true;
+                }
+            }
+            scanned += n;
+            // About 1.3 GB a second, so the scan takes no memory bandwidth the game would notice.
+            if ((offset / Chunk) % 64 == 63) {
+                std::this_thread::sleep_for(std::chrono::milliseconds{50});
+            }
+        }
+        if (!stop.stop_requested()) {
+            LOG_INFO(Render,
+                     "Large read {:#x} + {} MB: {} MB of it only zeros in 64 KB blocks, {} MB in "
+                     "whole {} MB granules (memory nothing wrote need not be resident)",
+                     device_addr, size >> 20, (zero_blocks * Block) >> 20,
+                     (zero_granules * Granule) >> 20, Granule >> 20);
+        }
+        zero_scan_running.store(false);
+    }};
 }
 
 bool BufferCache::LargeReadSynced(VAddr device_addr, u64 size) {

@@ -166,7 +166,6 @@ void SettingsWindow::SaveSettings(std::string profile) {
             now.particle_light_one_submit != before.particle_light_one_submit) {
             Adaptive::Glue::SetGamePatches(now);
         }
-        Adaptive::Glue::SetVramPriorities(vramPrioritiesSetting);
         const auto target_before = Adaptive::Glue::GetFpsTarget();
         const Adaptive::Glue::FpsTarget target_now{fpsTargetValues.at(fpsTargetSetting),
                                                    static_cast<u32>(lowestQualitySetting),
@@ -811,9 +810,6 @@ void SettingsWindow::DrawSettingsTable(SettingsCategory category) {
                                    "next launch)",
                                    particleLightsSetting);
             }
-            AddSettingCheckbox("VRAM Priorities: Keep Buffers and Drawn-To Images in Video "
-                               "Memory First (experimental, next launch)",
-                               vramPrioritiesSetting);
             AddSettingSliderInt("Window Width", windowWidthSetting, 0, 8000);
             AddSettingSliderInt("Window Height", windowHeightSetting, 0, 7000);
             AddSettingCheckbox("Enable HDR", hdrAllowedSetting);
@@ -897,7 +893,8 @@ void SettingsWindow::DrawSettingsTable(SettingsCategory category) {
             AddSettingCheckbox("Upload Large Buffers Once Between Waits",
                                syncLargeReadsOnceSetting);
             AddSettingCheckbox("Run Compute Rings on a Second Queue (Experimental, Requires "
-                               "Restart; Turned Off Again After a Launch That Crashes)",
+                               "Restart; Turned Off Again After a Launch That Crashes; Slower "
+                               "and Crashed on a GTX 1650)",
                                asyncComputeSetting);
             AddSettingCheckbox("Enable Shader Cache", pipelineCacheEnabledSetting);
             if (pipelineCacheEnabledSetting) {

@@ -467,6 +467,15 @@ private:
     /// Declared after what it uses, so it stops before any of that goes away.
     std::jthread readback_thread;
 
+    /// How much of a large range read from holds only zeros (build 43): memory nothing wrote
+    /// would not need to be resident, as reads of memory that is not return zeros. Scanned on its
+    /// own thread, at most once in 5 minutes for each range, and logged.
+    void NoteLargeRead(VAddr device_addr, u64 size);
+    std::mutex zero_scan_mutex;
+    std::vector<std::pair<std::pair<VAddr, u64>, u64>> zero_scans; ///< range, frame scanned
+    std::atomic<bool> zero_scan_running{false};
+    std::jthread zero_scan_thread;
+
     /// Copies guest memory into staging and applies the page protections of the uploads
     /// on a thread of its own, off the command processor. A submission flushes every job
     /// first: the staging a job copies into must be complete before the command buffer

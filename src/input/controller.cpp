@@ -376,18 +376,29 @@ void GameController::UpdateEmulatedMotionLocked(u64 timestamp) {
     }
     m_emu_pose = pose;
 
-    // The accelerometer reports the reaction to gravity, plus the up and down motion of a shake,
-    // turned into controller axes.
-    float up = Gravity;
+    // The accelerometer reports the reaction to gravity, turned into controller axes, plus the
+    // up and down motion of a shake.
+    const auto up_in = [](const Quaternion& q, float g, float out[3]) {
+        out[0] = g * 2.0f * (q.x * q.y + q.w * q.z);
+        out[1] = g * (1.0f - 2.0f * (q.x * q.x + q.z * q.z));
+        out[2] = g * 2.0f * (q.y * q.z - q.w * q.x);
+    };
+    up_in(pose, Gravity, accel_buf);
     if (m_emu_shake) {
+        // Along the controller's own up as G / H tilt it, not the world's: the mouse turns the
+        // controller around the world axes while painting, and with world up the shake reached
+        // the game along another axis after a while of that, and stopped counting as one
+        // (build 43). Flattened, so it is near its peaks most of the time and a game reading the
+        // pad once a frame, even at 10 frames a second, sees full swings.
         m_emu_shake_phase =
             std::fmod(m_emu_shake_phase + TwoPi * EmulatedShakeFrequency * dt, TwoPi);
-        up += EmulatedShakeAmplitude * std::sin(m_emu_shake_phase);
+        const float swing = std::clamp(2.0f * std::sin(m_emu_shake_phase), -1.0f, 1.0f);
+        float shake[3];
+        up_in(roll, EmulatedShakeAmplitude * swing, shake);
+        for (int i = 0; i < 3; ++i) {
+            accel_buf[i] += shake[i];
+        }
     }
-    const auto& q = pose;
-    accel_buf[0] = up * 2.0f * (q.x * q.y + q.w * q.z);
-    accel_buf[1] = up * (1.0f - 2.0f * (q.x * q.x + q.z * q.z));
-    accel_buf[2] = up * 2.0f * (q.y * q.z - q.w * q.x);
 }
 
 void GameController::PushStateLocked(u64 timestamp) {

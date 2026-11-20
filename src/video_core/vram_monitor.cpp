@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <condition_variable>
 #include <mutex>
 #include <map>
@@ -262,7 +263,7 @@ void Start(const Vulkan::Instance& instance) {
              PrioritiesOn(instance)
                  ? "on (buffers highest, memory of images drawn to higher than textures)"
                  : (instance.IsPageableDeviceLocalMemorySupported()
-                        ? "off (F3 to turn on, next launch)"
+                        ? "off (SS_VRAM_PRIORITIES=1 turns them on; slower on a GTX 1650)"
                         : "not available (the driver takes no memory priorities)"));
     g_thread = std::jthread{[&instance](std::stop_token stop) { Run(stop, &instance); }};
 }
@@ -275,8 +276,13 @@ void Stop() {
 }
 
 bool PrioritiesOn(const Vulkan::Instance& instance) {
-    static const bool on =
-        Adaptive::Glue::VramPriorities() && instance.IsPageableDeviceLocalMemorySupported();
+    // Only with SS_VRAM_PRIORITIES=1 since build 43: on a GTX 1650 they made Windows move twice
+    // as much memory (copy engine 10-17% busy against 5-8%) and gameplay ran at 17.3 fps against
+    // 29.9, as buffers and images drawn to at the higher priorities did not fit.
+    static const bool on = [&] {
+        const char* v = std::getenv("SS_VRAM_PRIORITIES");
+        return v && v[0] == '1' && instance.IsPageableDeviceLocalMemorySupported();
+    }();
     return on;
 }
 
