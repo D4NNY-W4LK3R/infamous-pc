@@ -22,6 +22,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <pdh.h>
+#include <pdhmsg.h>
 #endif
 
 namespace VideoCore::VramMonitor {
