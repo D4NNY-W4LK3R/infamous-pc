@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 infamous-pc contributors
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Standalone regression tests; no game files needed.
 // clang++ -std=c++20 -O2 -Wall -Wextra -pedantic tests/infamous_dash_cheats_test.cpp -o dash-tests && ./dash-tests
