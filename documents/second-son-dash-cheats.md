@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 infamous-pc contributors
+SPDX-License-Identifier: GPL-2.0-or-later
+-->
+
 # Optional Second Son movement cheats (prototype)
 
 Based on Liondarkz/issn_pc's GPL-2.0-or-later gameplay hook research
