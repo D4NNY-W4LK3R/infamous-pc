@@ -14,6 +14,7 @@
 #include "core/emulator_state.h"
 #include "core/file_format/psf.h"
 #include "memory_patcher.h"
+#include "infamous_dash_cheats.h"
 
 namespace MemoryPatcher {
 
@@ -273,6 +274,33 @@ void OnGameLoaded() {
         }
     }
     ApplyPendingPatches();
+
+    // Second Son's movement cheats are opt-in, verified against the original 1.07 guest
+    // instructions, and scoped to this game rather than changing emulator-wide behavior.
+    const auto dash_settings = InfamousDashCheats::FromEnvironment();
+    if (dash_settings.neon || dash_settings.video || dash_settings.smoke_scale > 1.0f) {
+        const auto dash_result = InfamousDashCheats::Apply(
+            g_game_serial, Common::Singleton<PSF>::Instance()->GetString("APP_VER").value_or(""),
+            reinterpret_cast<std::uint8_t*>(g_eboot_address), g_eboot_image_size, dash_settings);
+        auto print_status = [](const char* label, InfamousDashCheats::Status status) {
+            switch (status) {
+            case InfamousDashCheats::Status::Applied:
+                LOG_INFO(Loader, "Second Son dash cheat '{}' enabled", label);
+                break;
+            case InfamousDashCheats::Status::Unsupported:
+                LOG_WARNING(Loader, "Second Son dash cheat '{}' skipped: unsupported game/platform", label);
+                break;
+            case InfamousDashCheats::Status::SignatureMismatch:
+                LOG_WARNING(Loader, "Second Son dash cheat '{}' skipped: unexpected guest executable bytes", label);
+                break;
+            default:
+                break;
+            }
+        };
+        print_status("neon", dash_result.neon);
+        print_status("video", dash_result.video);
+        print_status("smoke", dash_result.smoke);
+    }
 }
 
 void AddPatchToQueue(const patchInfo& patchToAdd) {
