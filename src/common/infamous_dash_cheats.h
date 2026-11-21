@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 infamous-pc contributors
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Game-specific opt-in movement cheats for inFAMOUS Second Son CUSA00223 01.07.
 // Gameplay offsets/signatures adapted from Liondarkz/issn_pc (src/dash_hook.h,
