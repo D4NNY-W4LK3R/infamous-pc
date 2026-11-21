@@ -187,11 +187,35 @@ jobs:
         append-timestamp: false
         key: ${{ env.cache-name }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
 
+    # Reuse the compiler selection that passed Second Son Adaptive build 44.
+    # A separate LLVM installation can be older than the installed MSVC STL.
+    - name: Select matching Visual Studio clang-cl
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+        $vs = & $vswhere -latest -products * -property installationPath
+        if (!$vs) { throw 'Visual Studio installation not found' }
+        $llvm = Join-Path $vs 'VC\Tools\Llvm\x64\bin'
+        $clang = Join-Path $llvm 'clang-cl.exe'
+        if (!(Test-Path $clang)) { throw "Visual Studio bundled clang-cl not found: $clang" }
+        $llvm | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+        & $clang --version
+
+    # Proven fix from the successful second-son-adaptive Windows workflow.
+    - name: Patch OpenAL compatibility with MSVC 14.52
+      shell: bash
+      run: |
+        f=externals/openal-soft/alc/alc.cpp
+        if grep -q 'std::views::transform(&ContextBase::EffectSlotCluster::operator\*)' "$f"; then
+          sed -i 's/std::views::transform(&ContextBase::EffectSlotCluster::operator\*)/std::views::transform([](ContextBase::EffectSlotCluster const \&c) -> auto\& { return *c; })/' "$f"
+          grep -n 'EffectSlotCluster const &c' "$f"
+        fi
     - name: Print CPU Info
       run: bash -c "cat /proc/cpuinfo"
 
     - name: Configure CMake
-      run: cmake --fresh -G Ninja -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE=ON -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_CXX_FLAGS="/D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH /EHsc" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_EXE_LINKER_FLAGS=/MAP
+      run: cmake --fresh -G Ninja -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE=ON -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_EXE_LINKER_FLAGS=/MAP
 
     - name: Build
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel $env:NUMBER_OF_PROCESSORS
