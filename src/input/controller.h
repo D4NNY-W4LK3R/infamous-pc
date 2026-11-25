@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <chrono>
+
 #include <array>
 #include <atomic>
 #include <mutex>
@@ -166,6 +168,17 @@ private:
     bool m_emu_tilt_left{};
     bool m_emu_tilt_right{};
     bool m_emu_shake{};
+    /// What the game read while the shake key was held, logged when it is let go (build 45).
+    struct ShakeSeen {
+        int reads = 0;
+        int states = 0;
+        float min[3]{};
+        float max[3]{};
+        float roll = 0.0f;
+        std::chrono::steady_clock::time_point start{};
+    };
+    ShakeSeen m_shake_seen{};
+    void NoteShakeSeenLocked(const State* states, int count);
     float m_emu_shake_phase{};
     u64 m_last_motion_update{};
     Colour colour;

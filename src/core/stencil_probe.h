@@ -21,7 +21,7 @@
 //
 // Only Windows samples. A sample suspends the thread just to copy its registers and a slice of
 // its stack, with nothing allocated meanwhile, and sampling ends after a few minutes of each.
-// SS_STENCIL_PROBE=0 turns it off.
+// Off unless SS_STENCIL_PROBE=1 (build 45): stencil art turned out to work without P.
 namespace Core::StencilProbe {
 
 /// The game's own code (the eboot), once it is loaded.

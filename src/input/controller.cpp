@@ -6,7 +6,10 @@
 #include <cmath>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <thread>
+
+#include <fmt/format.h>
 #include <unordered_set>
 #include <utility>
 
@@ -118,6 +121,7 @@ int GameController::ReadStates(State* states, int states_num) {
         // Retained history can make a later multi-sample read return up to 64 stale reports, so
         // mixed single- and multi-sample reads require dedicated tests.
         states[0] = m_state;
+        NoteShakeSeenLocked(states, 1);
         return 1;
     }
 
@@ -129,6 +133,7 @@ int GameController::ReadStates(State* states, int states_num) {
         }
         states[read_count++] = std::move(*state);
     }
+    NoteShakeSeenLocked(states, read_count);
     return read_count;
 }
 
@@ -186,7 +191,49 @@ void GameController::SetEmulatedTilt(TiltDirection direction, bool held) {
 void GameController::SetEmulatedShake(bool shaking) {
     std::lock_guard lock{m_state_mutex};
     EnableMotionEmulationLocked();
+    if (shaking && !m_emu_shake) {
+        m_shake_seen = {};
+        for (int i = 0; i < 3; ++i) {
+            m_shake_seen.min[i] = 1e9f;
+            m_shake_seen.max[i] = -1e9f;
+        }
+        m_shake_seen.start = std::chrono::steady_clock::now();
+    } else if (!shaking && m_emu_shake) {
+        // Whether the game got the swings: some stencils took a shake, some did not (build 44).
+        const auto& seen = m_shake_seen;
+        const double held = std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                                          seen.start)
+                                .count();
+        const auto range = [&](int i) {
+            return seen.states == 0
+                       ? std::string{"-"}
+                       : fmt::format("{:.1f}..{:.1f}", seen.min[i] / Gravity,
+                                     seen.max[i] / Gravity);
+        };
+        LOG_INFO(Input,
+                 "Shake: held {:.1f} s, the game read the pad {} times ({} reports), "
+                 "accelerometer it got in g: x {}, y {}, z {}; tilt {:.0f} deg",
+                 held, seen.reads, seen.states, range(0), range(1), range(2),
+                 seen.roll * 57.29578f);
+    }
     m_emu_shake = shaking;
+}
+
+void GameController::NoteShakeSeenLocked(const State* states, int count) {
+    if (!m_emu_shake) {
+        return;
+    }
+    ++m_shake_seen.reads;
+    m_shake_seen.roll = m_emu_roll;
+    for (int n = 0; n < count; ++n) {
+        const float a[3] = {states[n].acceleration.x, states[n].acceleration.y,
+                            states[n].acceleration.z};
+        for (int i = 0; i < 3; ++i) {
+            m_shake_seen.min[i] = std::min(m_shake_seen.min[i], a[i]);
+            m_shake_seen.max[i] = std::max(m_shake_seen.max[i], a[i]);
+        }
+        ++m_shake_seen.states;
+    }
 }
 
 void GameController::PollState() {
@@ -392,6 +439,12 @@ void GameController::UpdateEmulatedMotionLocked(u64 timestamp) {
         out[1] = g * (1.0f - 2.0f * (q.x * q.x + q.z * q.z));
         out[2] = g * 2.0f * (q.y * q.z - q.w * q.x);
     };
+    // World right (1, 0, 0) in controller axes.
+    const auto side_in = [](const Quaternion& q, float g, float out[3]) {
+        out[0] = g * (1.0f - 2.0f * (q.y * q.y + q.z * q.z));
+        out[1] = g * 2.0f * (q.x * q.y - q.w * q.z);
+        out[2] = g * 2.0f * (q.x * q.z + q.w * q.y);
+    };
     up_in(pose, Gravity, accel_buf);
     if (m_emu_shake) {
         // Along the controller's own up as G / H tilt it, not the world's: the mouse turns the
@@ -404,8 +457,13 @@ void GameController::UpdateEmulatedMotionLocked(u64 timestamp) {
         const float swing = std::clamp(2.0f * std::sin(m_emu_shake_phase), -1.0f, 1.0f);
         float shake[3];
         up_in(roll, EmulatedShakeAmplitude * swing, shake);
+        // And as much along the controller's side axis, its up when held like a spray can, as
+        // the stencils that would not take a shake may want it there (build 45). The game sees
+        // the full swing on either axis.
+        float side[3];
+        side_in(roll, EmulatedShakeAmplitude * swing, side);
         for (int i = 0; i < 3; ++i) {
-            accel_buf[i] += shake[i];
+            accel_buf[i] += shake[i] + side[i];
         }
     }
 }

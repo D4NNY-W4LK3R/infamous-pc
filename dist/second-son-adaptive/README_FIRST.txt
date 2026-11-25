@@ -180,7 +180,9 @@ TROUBLESHOOTING
   holds only zeros - memory that would not need to be in video memory.
   Shake (T): since build 43 along the controller's own up, so mouse aiming no longer turns it
   into a sideways motion the game does not count. Since build 44 holding G or H no longer turns
-  the mouse's up and down around (stencil art works without P or tilting).
+  the mouse's up and down around (stencil art works without P or tilting). Since build 45 T
+  shakes along the controller's side axis too (its up when held like a spray can), and the log
+  gets a "Shake:" line for each press with what the game read.
   Experimental, build 44: F3 > Graphics > "Leave Empty Buffer Memory Out of Video Memory" (next
   launch). Of the 3 GB the game reads through two buffers, about 1.4 GB holds only zeros; with
   this on, those parts are not put in video memory until data lands there. The "VRAM:" lines

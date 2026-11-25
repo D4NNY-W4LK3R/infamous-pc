@@ -30,9 +30,11 @@ std::atomic<VAddr> g_base{0};
 std::atomic<u64> g_size{0};
 
 bool Wanted() {
+    // Off unless SS_STENCIL_PROBE=1 since build 45: stencil art works without P, so the probe
+    // has nothing left to find, and it sampled the game's main thread for it.
     static const bool wanted = [] {
         const char* v = std::getenv("SS_STENCIL_PROBE");
-        return !(v && v[0] == '0');
+        return v && v[0] == '1';
     }();
     return wanted;
 }
