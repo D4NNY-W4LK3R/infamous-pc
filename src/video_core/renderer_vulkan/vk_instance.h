@@ -578,6 +578,8 @@ private:
     bool image_view_min_lod{};
     bool shader_clock{};
     bool supports_memory_budget{};
+    bool diagnostic_checkpoints{};
+    bool device_fault{};
     bool pageable_device_local_memory{};
     bool supports_block_texel_view{};
     u64 total_memory_budget{};

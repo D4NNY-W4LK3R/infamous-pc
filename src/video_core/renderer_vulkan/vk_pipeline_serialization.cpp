@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <thread>
 #include <chrono>
 #include <string_view>
@@ -13,6 +14,7 @@
 #include "video_core/cache_storage.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
+#include "video_core/renderer_vulkan/vk_pipeline_common.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 
 namespace Serialization {
@@ -275,9 +277,11 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
     }
 
     std::vector<u32> spv{};
+    const auto read_start = std::chrono::steady_clock::now();
     Storage::DataBase::Instance().Load(Storage::BlobType::ShaderBinary,
                                        fmt::format("{:#018x}_{}", program->info.pgm_hash, perm_idx),
                                        spv);
+    PipelineTiming::NoteDatabaseRead(std::chrono::steady_clock::now() - read_start);
     if (spv.empty()) {
         return false;
     }
@@ -299,6 +303,7 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
     vk::ShaderModule module{};
 
     auto [it_pgm, new_program] = program_cache.try_emplace(program->info.pgm_hash);
+    const auto module_start = std::chrono::steady_clock::now();
     if (new_program) {
         module = CompileSPV(spv, instance.GetDevice());
         it_pgm.value() = std::move(program);
@@ -326,6 +331,7 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
         // The program loaded first is kept, and the one read for this stage goes away.
         spec.info = &it_pgm.value()->info;
     }
+    PipelineTiming::NoteModule(std::chrono::steady_clock::now() - module_start);
     it_pgm.value()->InsertPermut(module, std::move(spec), perm_idx);
 
     infos[stage] = &it_pgm.value()->info;
@@ -338,9 +344,16 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
 }
 
 void PipelineCache::WarmUp() {
+    using TimingClock = std::chrono::steady_clock;
+    const auto seconds_since = [](TimingClock::time_point t) {
+        return std::chrono::duration<double>(TimingClock::now() - t).count();
+    };
+    const auto open_start = TimingClock::now();
     // Always on, whatever older configs or launchers say: without it every launch compiles all
     // shaders again in game, which is what makes the game hitch while moving around the world.
     Storage::DataBase::Instance().Open();
+    LOG_INFO(Render, "Startup: shader database opened in {:.2f} s ({:.1f} s after launch)",
+             seconds_since(open_start), PipelineTiming::SecondsSinceLaunch());
 
     // Cached shaders are only valid for the recompiler and host GPU that produced them, so a
     // cache from another recompiler or GPU is dropped and rebuilt instead of being used.
@@ -387,6 +400,8 @@ void PipelineCache::WarmUp() {
     // messages: clicking it then showed "Not Responding", and no progress was shown (build 45).
     // It reports and handles messages every quarter of a second too (build 47).
     auto last_pump = std::chrono::steady_clock::now();
+    const auto read_start = TimingClock::now();
+    PipelineTiming::SetPreloading(true);
     Common::ReportStartupProgress("preparing shaders");
     Storage::DataBase::Instance().ForEachBlob(
         Storage::BlobType::PipelineKey, [&](std::vector<u8>&& data) {
@@ -422,6 +437,17 @@ void PipelineCache::WarmUp() {
             }
         });
 
+    const double read_s = seconds_since(read_start);
+    const double modules_s = PipelineTiming::ModuleNanoseconds() / 1e9;
+    const double database_s = PipelineTiming::DatabaseNanoseconds() / 1e9;
+    LOG_INFO(Render,
+             "Startup: read {} pipelines and handed them to the {} compiler threads in {:.1f} s: "
+             "{:.1f} s reading shaders from the database, {:.1f} s creating shader modules, "
+             "{:.1f} s the rest (mostly waiting for a free compiler thread); {} of them "
+             "compiled by the driver meanwhile",
+             num_total_pipelines, compiler->NumWorkers(), read_s, database_s, modules_s,
+             std::max(0.0, read_s - database_s - modules_s), PipelineTiming::Created(true));
+    const auto wait_start = TimingClock::now();
     // Wait for them with progress in the window title (Common::ReportStartupProgress), and give
     // up waiting when none finishes for a long time: twice a start stopped here for good with a
     // driver pipeline cache over 100 MB (build 28, 32). The game then starts anyway, the rest
@@ -469,6 +495,12 @@ void PipelineCache::WarmUp() {
         }
         Common::ReportStartupProgress({});
     }
+    PipelineTiming::SetPreloading(false);
+    LOG_INFO(Render, "Startup: waited {:.1f} s more for the compiler threads; shader preload "
+                     "took {:.1f} s in all, done {:.1f} s after launch",
+             seconds_since(wait_start), seconds_since(read_start),
+             PipelineTiming::SecondsSinceLaunch());
+    LOG_INFO(Render, "Startup: driver, in the preload: {}", PipelineTiming::Summary(true));
 
     LOG_INFO(Render, "Preloaded {} pipelines (all compiled and resident in VRAM)", num_pipelines);
     if (num_total_pipelines > num_pipelines) {

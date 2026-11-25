@@ -15,12 +15,14 @@
 #include "common/error.h"
 #include "common/multi_level_page_table.h"
 #include "common/perf_profiler.h"
+#include "common/scope_exit.h"
 #include "common/signal_context.h"
 #include "common/thread.h"
 #include "common/tuning.h"
 #include "core/emulator_settings.h"
 #include "core/memory.h"
 #include "core/signals.h"
+#include "video_core/buffer_cache/copy_back_log.h"
 #include "video_core/page_manager.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
@@ -697,7 +699,15 @@ struct SignalImpl : public PageManager::Impl {
         const auto size = std::min<u64>(8, PageManager::GetNextPageAddr(addr) - addr);
         const auto is_gpu_thread =
             std::this_thread::get_id() == rasterizer->GetGpuCommandProcessorThread();
-        if (Common::IsWriteError(context)) {
+        const bool is_write = Common::IsWriteError(context);
+        // For the copy-back log: the game code that touched the memory.
+        VideoCore::CopyBackLog::SetFault(
+            static_cast<u64>(reinterpret_cast<uintptr_t>(Common::GetRip(context))), addr,
+            is_write);
+        SCOPE_EXIT {
+            VideoCore::CopyBackLog::ClearFault();
+        };
+        if (is_write) {
             if (!rasterizer->InvalidateMemory(addr, size, is_gpu_thread)) {
                 return false;
             }

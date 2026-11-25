@@ -117,7 +117,12 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
         const vk::PipelineShaderStageRequiredSubgroupSizeCreateInfo subgroup_size_ci = {
             .requiredSubgroupSize = 64,
         };
+        vk::PipelineCreationFeedback creation_feedback{};
+        const vk::PipelineCreationFeedbackCreateInfo feedback_ci = {
+            .pPipelineCreationFeedback = &creation_feedback,
+        };
         const vk::ComputePipelineCreateInfo compute_pipeline_ci = {
+            .pNext = &feedback_ci,
             .flags = flags,
             .stage{
                 .pNext = this->instance.IsSubgroupSize64Supported() ? &subgroup_size_ci : nullptr,
@@ -140,6 +145,8 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
         }
         ASSERT_MSG(created.result == vk::Result::eSuccess, "Failed to create compute pipeline: {}",
                    vk::to_string(created.result));
+        PipelineTiming::NoteCreation(true, creation_feedback,
+                                     std::chrono::steady_clock::now() - start);
         const bool optimized = !(flags & vk::PipelineCreateFlagBits::eDisableOptimization);
         LogPipelineCreation(optimized ? "compute" : "unoptimized compute", debug_str, start);
         SetObjectName(device, *created.value, "Compute Pipeline {}", debug_str);

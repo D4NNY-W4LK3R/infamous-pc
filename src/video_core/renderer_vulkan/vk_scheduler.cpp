@@ -14,6 +14,7 @@
 #include "imgui/renderer/texture_manager.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_common.h"
+#include "video_core/renderer_vulkan/vk_gpu_hang.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 
 namespace Vulkan {
@@ -640,6 +641,14 @@ void Scheduler::MarkDispatch(DispatchMark mark, u64 program_hash, u32 groups, bo
     dispatch.marks = static_cast<u32>(mark) + 1;
 }
 
+void Scheduler::Checkpoint(GpuHang::Work work, u64 hash, u64 hash2, u64 count) {
+    if (!GpuHang::CheckpointsOn()) {
+        return;
+    }
+    CommandBuffer().setCheckpointNV(
+        GpuHang::Mark(work, !on_graphics_queue, hash, hash2, count, CurrentTick()));
+}
+
 void Scheduler::BeginSession() {
     EndSession();
 
@@ -680,6 +689,8 @@ void Scheduler::BeginSession() {
             context.primary.resetQueryPool(runs, pair * RunMarksPerPair, RunMarksPerPair);
         }
     });
+
+    Checkpoint(GpuHang::Work::CommandBuffer, session_id);
 
     // Timed one at a time, as their results are read once the command buffer is done.
     if (dispatch_pool && submitted_dispatches.empty() && session_id % TimedDispatchInterval == 0) {
@@ -859,7 +870,11 @@ void Scheduler::SubmitRecorded(const SubmitInfo& info, u64 signal_value) {
     if (on_graphics_queue) {
         ImGui::Core::TextureManager::Submit();
     }
+    GpuHang::NoteQueueOp(
+        on_graphics_queue ? GpuHang::QueueOp::GraphicsSubmit : GpuHang::QueueOp::ComputeSubmit,
+        signal_value, recorded.size());
     auto submit_result = queue.submit(submit_info, info.fence);
+    GpuHang::Check(submit_result, "a queue submit");
     ASSERT_MSG(submit_result == vk::Result::eSuccess, "Queue submit failed: {}",
                vk::to_string(submit_result));
     recorded.clear();

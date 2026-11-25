@@ -388,6 +388,13 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     const auto cmdbuf = scheduler.CommandBuffer();
     scheduler.GetDynamicState().BindGraphicsPipeline(cmdbuf, pipeline->Handle());
 
+    if (GpuHang::CheckpointsOn()) {
+        const auto* vertex_info = pipeline->GetStages()[u32(Shader::SwStage::Vertex)];
+        const auto* pixel_info = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+        scheduler.Checkpoint(GpuHang::Work::Draw, pixel_info ? pixel_info->pgm_hash : 0,
+                             vertex_info ? vertex_info->pgm_hash : 0,
+                             u64{regs.num_indices} * regs.num_instances.NumInstances());
+    }
     scheduler.MarkDispatch(Scheduler::DispatchMark::Start);
     if (is_indexed) {
         cmdbuf.drawIndexed(regs.num_indices, regs.num_instances.NumInstances(), 0,
@@ -474,6 +481,12 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
     const auto cmdbuf = scheduler.CommandBuffer();
     scheduler.GetDynamicState().BindGraphicsPipeline(cmdbuf, pipeline->Handle());
 
+    if (GpuHang::CheckpointsOn()) {
+        const auto* vertex_info = pipeline->GetStages()[u32(Shader::SwStage::Vertex)];
+        const auto* pixel_info = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+        scheduler.Checkpoint(GpuHang::Work::DrawIndirect, pixel_info ? pixel_info->pgm_hash : 0,
+                             vertex_info ? vertex_info->pgm_hash : 0, max_count);
+    }
     if (is_indexed) {
         ASSERT(sizeof(VkDrawIndexedIndirectCommand) == stride);
 
@@ -828,6 +841,8 @@ void Rasterizer::DispatchDirect() {
 
     const auto cmdbuf = scheduler.CommandBuffer();
     BindComputePipeline(*pipeline);
+    scheduler.Checkpoint(GpuHang::Work::Dispatch, cs.pgm_hash, 0,
+                         u64{cs_program.dim_x} * cs_program.dim_y * cs_program.dim_z);
     scheduler.MarkDispatch(Scheduler::DispatchMark::Start);
     cmdbuf.dispatch(cs_program.dim_x, cs_program.dim_y, cs_program.dim_z);
     scheduler.MarkDispatch(Scheduler::DispatchMark::End);
@@ -881,6 +896,9 @@ void Rasterizer::DispatchOnAsync(const ComputePipeline& pipeline, u32 dim_x, u32
     const auto cmdbuf = runtime.AsyncCommandBuffer();
     pipeline.BindResources(*async_scheduler, set_writes, push_data);
     async_scheduler->GetDynamicState().BindComputePipeline(cmdbuf, pipeline.Handle());
+    async_scheduler->Checkpoint(GpuHang::Work::Dispatch,
+                                pipeline.GetStage(Shader::SwStage::Compute).pgm_hash, 0,
+                                u64{dim_x} * dim_y * dim_z);
     cmdbuf.dispatch(dim_x, dim_y, dim_z);
     async_scheduler->CountWork();
     DebugState.IncDispatch();
@@ -936,6 +954,8 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
 
     const auto cmdbuf = scheduler.CommandBuffer();
     BindComputePipeline(*pipeline);
+    scheduler.Checkpoint(GpuHang::Work::DispatchIndirect,
+                         pipeline->GetStage(Shader::SwStage::Compute).pgm_hash);
     scheduler.MarkDispatch(Scheduler::DispatchMark::Start);
     cmdbuf.dispatchIndirect(buffer->Handle(), base);
     scheduler.MarkDispatch(Scheduler::DispatchMark::End);

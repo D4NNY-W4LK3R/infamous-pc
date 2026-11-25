@@ -13,6 +13,7 @@
 #include "imgui/renderer/imgui_core.h"
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
+#include "video_core/renderer_vulkan/vk_gpu_hang.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 
@@ -242,7 +243,7 @@ bool Instance::CreateDevice() {
         return false;
     }
 
-    boost::container::static_vector<const char*, 32> enabled_extensions;
+    boost::container::static_vector<const char*, 48> enabled_extensions;
     const auto add_extension = [&](std::string_view extension) -> bool {
         const auto result =
             std::find_if(available_extensions.begin(), available_extensions.end(),
@@ -384,6 +385,20 @@ bool Instance::CreateDevice() {
     }
     const bool calibrated_timestamps =
         TRACY_GPU_ENABLED ? add_extension(VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME) : false;
+    // The GPU hang record (build 50): checkpoints name the work the card was doing when the
+    // device is lost, and the fault report says what it faulted on, where the driver has it.
+    diagnostic_checkpoints = add_extension(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
+    device_fault = add_extension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
+    if (device_fault) {
+        const auto fault_chain =
+            physical_device.getFeatures2<vk::PhysicalDeviceFeatures2,
+                                         vk::PhysicalDeviceFaultFeaturesEXT>();
+        device_fault = fault_chain.get<vk::PhysicalDeviceFaultFeaturesEXT>().deviceFault;
+        if (!device_fault) {
+            // Enabled but not usable: taken out again.
+            enabled_extensions.pop_back();
+        }
+    }
 
     const auto family_properties = physical_device.getQueueFamilyProperties();
     if (family_properties.empty()) {
@@ -588,6 +603,9 @@ bool Instance::CreateDevice() {
         vk::PhysicalDevicePageableDeviceLocalMemoryFeaturesEXT{
             .pageableDeviceLocalMemory = true,
         },
+        vk::PhysicalDeviceFaultFeaturesEXT{
+            .deviceFault = true,
+        },
     };
 
     if (!custom_border_color) {
@@ -643,6 +661,9 @@ bool Instance::CreateDevice() {
         device_chain.unlink<vk::PhysicalDeviceMemoryPriorityFeaturesEXT>();
         device_chain.unlink<vk::PhysicalDevicePageableDeviceLocalMemoryFeaturesEXT>();
     }
+    if (!device_fault) {
+        device_chain.unlink<vk::PhysicalDeviceFaultFeaturesEXT>();
+    }
 
     auto [device_result, dev] = physical_device.createDeviceUnique(device_chain.get());
     if (device_result != vk::Result::eSuccess) {
@@ -667,6 +688,8 @@ bool Instance::CreateDevice() {
     }
     LOG_INFO(Render_Vulkan, "Queues in the graphics family: {}, second queue for compute rings: {}",
              family_properties[queue_family_index].queueCount, second_queue);
+    GpuHang::Init(*device, graphics_queue, compute_queue, async_queue, diagnostic_checkpoints,
+                  device_fault);
 
     if (calibrated_timestamps) {
         const auto [time_domains_result, time_domains] =

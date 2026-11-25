@@ -27,6 +27,7 @@
 #include "video_core/cache_storage.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_pipeline_common.h"
 #include "video_core/renderer_vulkan/vk_pipeline_serialization.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
@@ -514,7 +515,16 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .supports_shader_stencil_export = instance_.IsShaderStencilExportSupported(),
     };
 
+    using TimingClock = std::chrono::steady_clock;
+    const auto ms_since = [](TimingClock::time_point t) {
+        return std::chrono::duration<double, std::milli>(TimingClock::now() - t).count();
+    };
+    LOG_INFO(Render_Vulkan, "Startup: shaders set up from {:.1f} s after launch",
+             PipelineTiming::SecondsSinceLaunch());
+    const auto blob_start = TimingClock::now();
     const auto driver_blob = LoadDriverCacheBlob(instance);
+    const double blob_ms = ms_since(blob_start);
+    const auto cache_start = TimingClock::now();
     const vk::PipelineCacheCreateInfo cache_ci{
         .initialDataSize = driver_blob.size(),
         .pInitialData = driver_blob.empty() ? nullptr : driver_blob.data(),
@@ -523,6 +533,10 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     ASSERT_MSG(cache_result == vk::Result::eSuccess, "Failed to create pipeline cache: {}",
                vk::to_string(cache_result));
     pipeline_cache = std::move(cache);
+    LOG_INFO(Render_Vulkan,
+             "Startup: driver cache file ({} MB) read in {:.0f} ms, handed to the driver in "
+             "{:.0f} ms",
+             driver_blob.size() >> 20, blob_ms, ms_since(cache_start));
 
     async_shader_compile = EmulatorSettings.IsAsyncShaderCompile();
     compiler = std::make_unique<PipelineCompiler>(PipelineCompiler::DefaultNumWorkers());
@@ -541,11 +555,16 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         retried += ".bad.retried";
         std::filesystem::remove(retried, ec);
     }
+    const auto save_start = TimingClock::now();
     SaveDriverCache();
+    LOG_INFO(Render_Vulkan, "Startup: driver cache saved after the preload in {:.0f} ms; shaders "
+                            "ready {:.1f} s after launch",
+             ms_since(save_start), PipelineTiming::SecondsSinceLaunch());
     StartDriverCacheSaver();
 }
 
 PipelineCache::~PipelineCache() {
+    LOG_INFO(Render_Vulkan, "Pipelines in game: {}", PipelineTiming::Summary(false));
     StopDriverCacheSaver();
     SaveDriverCache();
 }
@@ -554,7 +573,11 @@ bool PipelineCache::SaveDriverCacheUnchecked() {
     if (!pipeline_cache) {
         return false;
     }
+    const auto get_start = std::chrono::steady_clock::now();
     auto [res, blob] = instance.GetDevice().getPipelineCacheData(*pipeline_cache);
+    const double get_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - get_start)
+            .count();
     if (res != vk::Result::eSuccess || blob.empty()) {
         return false;
     }
@@ -596,8 +619,14 @@ bool PipelineCache::SaveDriverCacheUnchecked() {
     if (driver_saver) {
         driver_saver->last_hash = h;
     }
-    LOG_INFO(Render_Vulkan, "Saved driver VkPipelineCache ({} KB) to {}", blob.size() / 1024,
-             path.string());
+    LOG_INFO(Render_Vulkan,
+             "Saved driver VkPipelineCache ({} KB) to {} (getting it from the driver took {:.0f} "
+             "ms, hashing and writing {:.0f} ms more)",
+             blob.size() / 1024, path.string(), get_ms,
+             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
+                                                       get_start)
+                     .count() -
+                 get_ms);
     return true;
 }
 

@@ -24,6 +24,7 @@
 #include "video_core/amdgpu/regs_color.h"
 #include "video_core/amdgpu/regs_primitive.h"
 #include "video_core/renderer_vulkan/vk_command_recorder.h"
+#include "video_core/renderer_vulkan/vk_gpu_hang.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
 #include "video_core/renderer_vulkan/vk_semaphore.h"
 #include "vulkan/vulkan.hpp"
@@ -622,6 +623,9 @@ public:
     /// Draws, dispatches, barriers, render passes, switches between draws and dispatches and
     /// barriers right before them.
     using CostCounts = std::array<u64, 6>;
+
+    /// Leaves a diagnostic checkpoint for the GPU hang record (build 50), when they are on.
+    void Checkpoint(GpuHang::Work work, u64 hash = 0, u64 hash2 = 0, u64 count = 0);
 
     /// Notes that the work recorded from now on is dispatches, or draws, where the work before
     /// it was the other kind. The GPU time of each run of them is measured, for the perf summary.

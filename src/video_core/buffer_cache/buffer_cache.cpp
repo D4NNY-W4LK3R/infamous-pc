@@ -18,6 +18,8 @@
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/buffer_cache.h"
+#include "video_core/buffer_cache/copy_back_log.h"
+#include "video_core/renderer_vulkan/vk_gpu_hang.h"
 #include "video_core/buffer_cache/lazy_zero.h"
 #include "adaptive/emulator_glue.h"
 #include "video_core/vram_monitor.h"
@@ -184,6 +186,7 @@ void BufferCache::SetHostWorkOn(Vulkan::Scheduler& target) {
 }
 
 BufferCache::~BufferCache() {
+    CopyBackLog::Report();
     if (upload_thread.joinable()) {
         upload_thread.request_stop();
         upload_thread.join();
@@ -368,6 +371,9 @@ void BufferCache::TickFrame() {
         fault_manager->ProcessFaultBuffer();
     }
     ApplyFinishedReadbacks();
+    CopyBackLog::Tick(memory, [this](VAddr addr, u64 size) {
+        return memory_tracker->IsRegionGpuModified(addr, size);
+    });
 }
 
 void BufferCache::InvalidateMemory(VAddr device_addr, u64 size, bool assume_locks) {
@@ -398,8 +404,14 @@ std::tuple<const Buffer*, VAddr, VAddr> BufferCache::GetReadbackWindow(VAddr dev
 }
 
 void BufferCache::ReadMemory(VAddr device_addr, u64 size, bool is_write, bool assume_locks) {
-    const auto download = [this, device_addr, size] {
+    // What was copied back, for the copy-back log (build 50). Set where the window is known.
+    VAddr logged_start = 0;
+    VAddr logged_end = 0;
+    const auto started = std::chrono::steady_clock::now();
+    const auto download = [this, device_addr, size, &logged_start, &logged_end] {
         const auto [arena, window_start, window_end] = GetReadbackWindow(device_addr, size);
+        logged_start = window_start;
+        logged_end = window_end;
         SettleReadbacks(window_start, window_end);
         DownloadMemory(arena, window_start, window_end - window_start);
     };
@@ -419,12 +431,21 @@ void BufferCache::ReadMemory(VAddr device_addr, u64 size, bool is_write, bool as
                                             .count();
             ++readback_stats.pickups;
             readback = StartReadback(device_addr, size);
+            if (readback) {
+                logged_start = readback->start;
+                logged_end = readback->end;
+            }
         });
         if (readback && !FinishReadback(*readback)) {
             // The GPU wrote the memory again after the copy was recorded.
             liverpool->SendCommand<true>(download);
         }
     }
+    CopyBackLog::NoteCopyBack(
+        memory, device_addr, size, logged_start, logged_end, is_write, assume_locks,
+        static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                             std::chrono::steady_clock::now() - started)
+                             .count()));
     if (is_write) {
         memory_tracker->MarkRegionAsCpuModified(device_addr, size);
     }
@@ -604,6 +625,7 @@ std::shared_ptr<BufferCache::Readback> BufferCache::RecordReadback(const Buffer*
         readback->semaphore = async_scheduler->GetWorkSemaphore();
         readback->tick = async_scheduler->CurrentTick();
     } else {
+        scheduler.Checkpoint(Vulkan::GpuHang::Work::CopyBack, start, 0, total_size_bytes);
         runtime.CopyBuffer(arena, readback->staging.buffer, readback->copies);
         readback->semaphore = scheduler.GetWorkSemaphore();
         readback->tick = scheduler.CurrentTick();
@@ -734,6 +756,7 @@ void BufferCache::ReadbackThread(std::stop_token token) {
         while (result == vk::Result::eTimeout && !token.stop_requested() && !readback->Done()) {
             result = device.waitSemaphores(wait_info, 10'000'000);
         }
+        Vulkan::GpuHang::Check(result, "the copy-back writer waiting for a copy");
         // A game thread touching the memory meanwhile may have written it back already, and a
         // copy the GPU wrote over again is recovered by the GPU thread once it sees it is stale.
         if (result == vk::Result::eSuccess) {
@@ -768,6 +791,7 @@ bool BufferCache::FinishReadback(Readback& readback, bool ahead) {
             dst_addr, readback.staging.mapped + (copy.dstOffset - readback.staging.offset),
             copy.size);
     }
+    CopyBackLog::NoteWrittenBack(readback.start, readback.end);
     // The GPU thread marks a readback stale before it marks the memory GPU modified again,
     // which takes the region locks held while checking here, so a newer write keeps its mark.
     const bool unmarked = memory_tracker->UnmarkRegionAsGpuModifiedIf(
@@ -949,6 +973,7 @@ void BufferCache::DownloadMemory(const Buffer* arena, VAddr device_addr, u64 siz
     for (auto& copy : copies) {
         copy.dstOffset += download.offset;
     }
+    scheduler.Checkpoint(Vulkan::GpuHang::Work::CopyBack, device_addr, 0, total_size_bytes);
     runtime.CopyBuffer(arena, download.buffer, copies);
     scheduler.Finish();
 
@@ -959,6 +984,7 @@ void BufferCache::DownloadMemory(const Buffer* arena, VAddr device_addr, u64 siz
         memory->TryWriteBacking(dst_addr, download.mapped + (copy.dstOffset - download.offset),
                                 copy.size);
     }
+    CopyBackLog::NoteWrittenBack(device_addr, device_addr + size);
     memory_tracker->UnmarkRegionAsGpuModified(device_addr, size, false);
 }
 
@@ -1841,7 +1867,14 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
 
     info.AddWait(signal_sema, signal_tick);
     const auto start = std::chrono::steady_clock::now();
+    u64 binds_in_this{};
+    for (const auto& binds : pending_binds) {
+        binds_in_this += binds.binds.size();
+    }
+    Vulkan::GpuHang::NoteQueueOp(Vulkan::GpuHang::QueueOp::SparseBind, binds_in_this,
+                                 signal_tick);
     auto submit_result = instance.GetGraphicsQueue().bindSparse(sparse_info);
+    Vulkan::GpuHang::Check(submit_result, "a sparse bind (empty buffer memory left out)");
     ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");
     const auto elapsed = std::chrono::steady_clock::now() - start;
     Common::Perf::Record(Common::Perf::Stall::SparseBind,

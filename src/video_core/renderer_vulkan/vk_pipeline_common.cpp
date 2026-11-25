@@ -3,6 +3,7 @@
 
 #include <thread>
 #include <boost/container/static_vector.hpp>
+#include <fmt/format.h>
 
 #include "common/perf_profiler.h"
 #include "shader_recompiler/resource.h"
@@ -12,6 +13,104 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 
 namespace Vulkan {
+
+namespace PipelineTiming {
+namespace {
+const std::chrono::steady_clock::time_point launch = std::chrono::steady_clock::now();
+std::atomic<bool> preloading{false};
+
+struct Counts {
+    std::atomic<u64> created{};
+    std::atomic<u64> hits{};
+    std::atomic<u64> misses{};
+    std::atomic<u64> no_feedback{};
+    std::atomic<u64> compute{};
+    std::atomic<u64> hit_ns{};
+    std::atomic<u64> miss_ns{};
+    std::atomic<u64> longest_ns{};
+    std::atomic<u64> slow{}; // 100 ms or more
+};
+Counts preload_counts;
+Counts game_counts;
+std::atomic<u64> module_ns{};
+std::atomic<u64> database_ns{};
+
+u64 Ns(std::chrono::steady_clock::duration d) {
+    return static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(d).count());
+}
+} // namespace
+
+double SecondsSinceLaunch() noexcept {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - launch).count();
+}
+
+void SetPreloading(bool value) noexcept {
+    preloading.store(value, std::memory_order_release);
+}
+
+void NoteCreation(bool compute, const vk::PipelineCreationFeedback& feedback,
+                  std::chrono::steady_clock::duration took) noexcept {
+    Counts& c = preloading.load(std::memory_order_acquire) ? preload_counts : game_counts;
+    const u64 ns = Ns(took);
+    c.created.fetch_add(1, std::memory_order_relaxed);
+    c.compute.fetch_add(compute ? 1 : 0, std::memory_order_relaxed);
+    if (!(feedback.flags & vk::PipelineCreationFeedbackFlagBits::eValid)) {
+        c.no_feedback.fetch_add(1, std::memory_order_relaxed);
+    } else if (feedback.flags & vk::PipelineCreationFeedbackFlagBits::eApplicationPipelineCacheHit) {
+        c.hits.fetch_add(1, std::memory_order_relaxed);
+        c.hit_ns.fetch_add(ns, std::memory_order_relaxed);
+    } else {
+        c.misses.fetch_add(1, std::memory_order_relaxed);
+        c.miss_ns.fetch_add(ns, std::memory_order_relaxed);
+    }
+    if (ns >= 100'000'000) {
+        c.slow.fetch_add(1, std::memory_order_relaxed);
+    }
+    u64 longest = c.longest_ns.load(std::memory_order_relaxed);
+    while (ns > longest &&
+           !c.longest_ns.compare_exchange_weak(longest, ns, std::memory_order_relaxed)) {
+    }
+}
+
+void NoteModule(std::chrono::steady_clock::duration took) noexcept {
+    if (preloading.load(std::memory_order_acquire)) {
+        module_ns.fetch_add(Ns(took), std::memory_order_relaxed);
+    }
+}
+
+void NoteDatabaseRead(std::chrono::steady_clock::duration took) noexcept {
+    database_ns.fetch_add(Ns(took), std::memory_order_relaxed);
+}
+
+u64 Created(bool preload) noexcept {
+    return (preload ? preload_counts : game_counts).created.load(std::memory_order_relaxed);
+}
+
+u64 ModuleNanoseconds() noexcept {
+    return module_ns.load(std::memory_order_relaxed);
+}
+
+u64 DatabaseNanoseconds() noexcept {
+    return database_ns.load(std::memory_order_relaxed);
+}
+
+std::string Summary(bool preload) {
+    const Counts& c = preload ? preload_counts : game_counts;
+    const u64 created = c.created.load();
+    const u64 hits = c.hits.load();
+    const u64 misses = c.misses.load();
+    const auto avg_ms = [](u64 ns, u64 n) { return n ? static_cast<double>(ns) / n / 1e6 : 0.0; };
+    return fmt::format(
+        "{} pipelines created by the driver ({} compute): {} from its saved cache ({:.0f}%, "
+        "{:.2f} ms each on average, {:.1f} s in all), {} compiled anew ({:.1f} ms each on "
+        "average, {:.1f} s in all), {} without the driver saying; longest {:.0f} ms, {} took "
+        "100 ms or more (times summed over the compiler threads)",
+        created, c.compute.load(), hits, created ? hits * 100.0 / created : 0.0,
+        avg_ms(c.hit_ns.load(), hits), c.hit_ns.load() / 1e9, misses,
+        avg_ms(c.miss_ns.load(), misses), c.miss_ns.load() / 1e9, c.no_feedback.load(),
+        c.longest_ns.load() / 1e6, c.slow.load());
+}
+} // namespace PipelineTiming
 
 Pipeline::Pipeline(const Instance& instance_, Scheduler& scheduler_, DescriptorHeap& desc_heap_,
                    const Shader::Profile& profile_, vk::PipelineCache pipeline_cache_,

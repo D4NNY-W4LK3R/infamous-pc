@@ -25,6 +25,7 @@
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/renderdoc.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
+#include "video_core/renderer_vulkan/vk_gpu_hang.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 #include "video_core/texture_cache/image.h"
@@ -619,6 +620,7 @@ Frame* Presenter::PrepareLastFrame() {
         if (result == vk::Result::eTimeout) {
             continue;
         }
+        GpuHang::Check(result, "the presenter waiting for a frame");
         ASSERT_MSG(result != vk::Result::eErrorDeviceLost,
                    "Device lost during waiting for a frame");
     }
@@ -1130,6 +1132,7 @@ Frame* Presenter::GetRenderFrame() {
 
     // Wait for the presentation to be finished so all frame resources are free
     while (wait() != vk::Result::eSuccess) {
+        GpuHang::Check(result, "the presenter waiting for a free frame");
         ASSERT_MSG(result != vk::Result::eErrorDeviceLost,
                    "Device lost during waiting for a frame");
         // Retry if the waiting times out

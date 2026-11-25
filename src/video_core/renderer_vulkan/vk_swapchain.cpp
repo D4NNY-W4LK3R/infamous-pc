@@ -8,7 +8,9 @@
 #include "core/emulator_settings.h"
 #include "imgui/renderer/imgui_core.h"
 #include "sdl_window.h"
+#include "video_core/renderer_vulkan/vk_gpu_hang.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_pipeline_common.h"
 #include "video_core/renderer_vulkan/vk_swapchain.h"
 
 namespace Vulkan {
@@ -107,6 +109,7 @@ bool Swapchain::AcquireNextImage() {
     vk::Result result =
         device.acquireNextImageKHR(swapchain, std::numeric_limits<u64>::max(),
                                    image_acquired[frame_index], VK_NULL_HANDLE, &image_index);
+    GpuHang::Check(result, "acquiring a swapchain image");
 
     switch (result) {
     case vk::Result::eSuccess:
@@ -136,7 +139,14 @@ bool Swapchain::Present() {
         .pImageIndices = &image_index,
     };
 
+    static u64 presents = 0;
+    GpuHang::NoteQueueOp(GpuHang::QueueOp::Present, ++presents);
+    if (presents == 1 || presents == 1000) {
+        LOG_INFO(Render_Vulkan, "Startup: frame {} shown {:.1f} s after launch", presents,
+                 PipelineTiming::SecondsSinceLaunch());
+    }
     auto result = instance.GetPresentQueue().presentKHR(present_info);
+    GpuHang::Check(result, "presenting a frame");
     if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR) {
         needs_recreation = true;
     } else {

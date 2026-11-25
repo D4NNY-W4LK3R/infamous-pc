@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "video_core/renderer_vulkan/vk_compute_queue.h"
+#include "video_core/renderer_vulkan/vk_gpu_hang.h"
 
 #include <atomic>
 
@@ -80,6 +81,7 @@ u64 ComputeQueue::Submit(std::span<const std::pair<vk::Semaphore, u64>> waits) {
 
     std::scoped_lock lock{submit_mutex};
     const auto submit_result = queue.submit(submit_info, nullptr);
+    GpuHang::Check(submit_result, "a compute queue submit");
     ASSERT_MSG(submit_result == vk::Result::eSuccess, "Compute queue submit failed: {}",
                vk::to_string(submit_result));
     current = vk::CommandBuffer{};

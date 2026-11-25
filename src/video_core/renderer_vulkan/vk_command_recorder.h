@@ -392,6 +392,13 @@ public:
         Record([=](vk::CommandBuffer cmd) { cmd.resetQueryPool(pool, first, count); });
     }
 
+    /// An NVIDIA diagnostic checkpoint (the GPU hang record); does nothing for a null marker.
+    void setCheckpointNV(const void* marker) const {
+        if (marker) {
+            Record([=](vk::CommandBuffer cmd) { cmd.setCheckpointNV(marker); });
+        }
+    }
+
     void writeTimestamp2(vk::PipelineStageFlags2 stage, vk::QueryPool pool, u32 query) const {
         Record([=](vk::CommandBuffer cmd) { cmd.writeTimestamp2(stage, pool, query); });
     }

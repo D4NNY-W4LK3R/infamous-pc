@@ -448,8 +448,14 @@ void GraphicsPipeline::Compile(const CompileInputs& inputs) {
     // In practice, we use dynamic state for all of it.
     constexpr vk::PipelineDepthStencilStateCreateInfo depth_stencil_info = {};
 
-    const vk::GraphicsPipelineCreateInfo pipeline_info = {
+    // Whether the driver took it from its saved cache, for the start-up timing (build 50).
+    vk::PipelineCreationFeedback creation_feedback{};
+    const vk::PipelineCreationFeedbackCreateInfo feedback_ci = {
         .pNext = &pipeline_rendering_ci,
+        .pPipelineCreationFeedback = &creation_feedback,
+    };
+    const vk::GraphicsPipelineCreateInfo pipeline_info = {
+        .pNext = &feedback_ci,
         .stageCount = static_cast<u32>(shader_stages.size()),
         .pStages = shader_stages.data(),
         .pVertexInputState = !instance.IsVertexInputDynamicState() ? &vertex_input_info : nullptr,
@@ -473,6 +479,8 @@ void GraphicsPipeline::Compile(const CompileInputs& inputs) {
     }
     ASSERT_MSG(created.result == vk::Result::eSuccess, "Failed to create graphics pipeline: {}",
                vk::to_string(created.result));
+    PipelineTiming::NoteCreation(false, creation_feedback,
+                                 std::chrono::steady_clock::now() - start);
     LogPipelineCreation("graphics", inputs.debug_str, start);
     SetObjectName(device, *created.value, "Graphics Pipeline {}", inputs.debug_str);
     pipeline = std::move(created.value);

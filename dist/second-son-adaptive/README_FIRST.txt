@@ -179,6 +179,18 @@ TROUBLESHOOTING
   only SS_VRAM_PRIORITIES=1 turns them on. Build 43 also logs, for the large ranges the game
   reads (two texel buffers over 3 GB of its memory, all of it kept in video memory), how much
   holds only zeros - memory that would not need to be in video memory.
+  Build 50 measures only, and changes nothing in how the game runs:
+  - GPU hang record: if the card stops responding ("device lost"), the log and
+    log\gpu_hang_record.txt name the draws and dispatches it had started and not finished
+    (NVIDIA diagnostic checkpoints; SS_GPU_CHECKPOINTS=0 turns them off), the driver's fault
+    report where it has one, and the last submits, sparse binds and presents.
+    COLLECT_DIAGNOSTICS also writes gpu_driver_events.txt (Windows resetting the display
+    driver, NVIDIA driver errors).
+  - "Startup:" lines time each part of the shader loading, and say how many pipelines the
+    driver took from its saved cache and how many it compiled anew.
+  - "Copy-backs:" lines every 30 s and at the end: which memory the game waited to have
+    copied back from the card, the game code that touched it, and for a sample of waits on a
+    write how much of the copied memory the game then wrote over anyway.
   Shake (T): since build 43 along the controller's own up, so mouse aiming no longer turns it
   into a sideways motion the game does not count. Since build 44 holding G or H no longer turns
   the mouse's up and down around (stencil art works without P or tilting). Since build 45 T

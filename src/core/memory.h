@@ -257,6 +257,10 @@ public:
 
     bool TryWriteBacking(void* address, const void* data, u64 size);
 
+    /// Reads guest memory through its physical backing, whatever the protection of its pages, so
+    /// it never faults (the copy-back log, build 50). False if it isn't all backed.
+    bool TryReadBacking(const void* address, void* data, u64 size);
+
     void SetupMemoryRegions(u64 flexible_size, bool use_extended_mem1, bool use_extended_mem2);
 
     PAddr PoolExpand(PAddr search_start, PAddr search_end, u64 size, u64 alignment);

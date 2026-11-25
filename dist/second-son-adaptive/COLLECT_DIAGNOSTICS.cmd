@@ -33,6 +33,9 @@ systeminfo > "%D%\systeminfo.txt" 2>nul
 rem Windows records why a program ended when the emulator could not log it (exception code and
 rem module of an application crash, 1000; hangs, 1002): the last ones of shadPS4.
 powershell -NoProfile -Command "Get-WinEvent -FilterHashtable @{LogName='Application'; Id=1000,1001,1002} -MaxEvents 200 -ErrorAction SilentlyContinue | Where-Object { $_.Message -match 'shadPS4' } | Select-Object -First 8 | Format-List TimeCreated,Id,Message" > "%D%\app_errors.txt" 2>&1
+rem The display driver's own records of the card stopping (build 50): Windows resetting it after
+rem a timeout (Display 4101) and the NVIDIA driver's errors (nvlddmkm 13, 14, 153 and others).
+powershell -NoProfile -Command "Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='nvlddmkm','Display'} -MaxEvents 20 -ErrorAction SilentlyContinue | Format-List TimeCreated,ProviderName,Id,Message" > "%D%\gpu_driver_events.txt" 2>&1
 rem Hardware-accelerated GPU scheduling (HwSchMode 2 = on, 1 = off; missing = off).
 reg query "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" /v HwSchMode > "%D%\gpu_scheduling.txt" 2>&1
 powershell -NoProfile -Command "Get-CimInstance Win32_VideoController | Select-Object Name,DriverVersion,AdapterRAM | Format-List | Out-File -Encoding utf8 '%D%\gpu.txt'; Get-PSDrive -PSProvider FileSystem | Select-Object Name,@{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}} | Format-Table | Out-File -Encoding utf8 '%D%\drives.txt'"

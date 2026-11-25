@@ -7,6 +7,7 @@
 #include <chrono>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <string_view>
 
 #include "shader_recompiler/profile.h"
@@ -31,6 +32,27 @@ static constexpr auto AllGraphicsStageBits =
 class Instance;
 class Scheduler;
 class DescriptorHeap;
+
+/// Start-up timing (build 50): a start took about 8 minutes although the driver's shader cache
+/// was saved (186 MB) and loaded. Each pipeline asks the driver whether it came from that cache
+/// (pipeline creation feedback), and the shader preload times its parts, for "Startup:" lines.
+namespace PipelineTiming {
+double SecondsSinceLaunch() noexcept;
+/// While true, pipelines created are counted as the shader preload's.
+void SetPreloading(bool preloading) noexcept;
+/// Counts a pipeline the driver created, with what it reported and the time the call took.
+void NoteCreation(bool compute, const vk::PipelineCreationFeedback& feedback,
+                  std::chrono::steady_clock::duration took) noexcept;
+/// Time spent creating shader modules and reading the shader database in the preload.
+void NoteModule(std::chrono::steady_clock::duration took) noexcept;
+void NoteDatabaseRead(std::chrono::steady_clock::duration took) noexcept;
+u64 Created(bool preload) noexcept;
+u64 ModuleNanoseconds() noexcept;
+u64 DatabaseNanoseconds() noexcept;
+/// The driver's part: from its cache or compiled, how often and how long. preload: the
+/// preload's pipelines, else the ones created in game.
+std::string Summary(bool preload);
+} // namespace PipelineTiming
 
 class Pipeline {
 public:
