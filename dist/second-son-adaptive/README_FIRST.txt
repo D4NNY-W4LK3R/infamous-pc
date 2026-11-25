@@ -92,7 +92,7 @@ THE OPTIMIZER (F1)
   Starting: the shaders you have met so far are loaded before the game starts, with the
   progress in the window title ("loading shaders 2100 of 6918"). That can take a minute or two
   after the driver's own cache was reset - let it finish; nothing has to be renamed. Since
-  build 37 the driver's cache is kept under 96 MB (starts froze on 106 and 119 MB ones), and a
+  build 46 the driver's cache is kept under 512 MB (it grows past 160 MB as you meet more of the game), and a
   start whose loading stops for 45 s goes on by itself and sets that cache aside next time.
   The report's "Freezes" section shows the time lost to freezes per 10 minutes of play.
   The report's "What holds the frame rate back" section shows, for the seconds of play under
@@ -182,7 +182,9 @@ TROUBLESHOOTING
   into a sideways motion the game does not count. Since build 44 holding G or H no longer turns
   the mouse's up and down around (stencil art works without P or tilting). Since build 45 T
   shakes along the controller's side axis too (its up when held like a spray can), and the log
-  gets a "Shake:" line for each press with what the game read.
+  gets a "Shake:" line for each press with what the game read. Since build 46 the mouse turns
+  the virtual controller around its own axes, so painting up and down keeps its speed however
+  long you have painted left and right.
   Experimental, build 44: F3 > Graphics > "Leave Empty Buffer Memory Out of Video Memory" (next
   launch). Of the 3 GB the game reads through two buffers, about 1.4 GB holds only zeros; with
   this on, those parts are not put in video memory until data lands there. The "VRAM:" lines

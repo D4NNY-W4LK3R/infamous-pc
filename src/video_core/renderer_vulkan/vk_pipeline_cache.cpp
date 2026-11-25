@@ -340,8 +340,13 @@ std::filesystem::path DriverCachePath(const Instance& instance) {
 /// player's 67 MB one aside: the next start compiled all 4275 pipelines anew for 8 minutes and
 /// could not save the result either. A start that stalls is caught by the preload's watchdog.
 std::uintmax_t MaxDriverCacheBytes() {
+    // 512 MB since build 46: the player's shaders grew to 10562 pipelines, a 169 MB driver
+    // cache, which the 96 MB cap kept from being saved, so every start compiled all of them anew
+    // (12 minutes). The starts that "froze" with 106 and 119 MB were from before the preload
+    // showed progress and kept Windows messages handled, when Windows called the window not
+    // responding while it worked; a preload that really stops is caught by its watchdog.
     static const std::uintmax_t bytes = [] {
-        std::uintmax_t mb = 96;
+        std::uintmax_t mb = 512;
         if (const char* v = std::getenv("SS_DRIVER_CACHE_MAX_MB")) {
             const long n = std::atol(v);
             if (n >= 8 && n <= 4096) {
@@ -363,7 +368,10 @@ std::vector<u8> LoadDriverCacheBlob(const Instance& instance) {
     using namespace Common::FS;
     const auto path = DriverCachePath(instance);
     std::error_code ec;
-    if (std::filesystem::exists(WarmUpMarkerPath(instance), ec)) {
+    auto retried = path;
+    retried += ".bad.retried";
+    if (std::filesystem::exists(WarmUpMarkerPath(instance), ec) &&
+        std::filesystem::exists(path, ec)) {
         auto aside = path;
         aside += ".bad";
         std::filesystem::remove(aside, ec);
@@ -374,6 +382,23 @@ std::vector<u8> LoadDriverCacheBlob(const Instance& instance) {
                     ec ? "could not rename it" : aside.filename().string());
         if (ec) {
             return {};
+        }
+    }
+    if (!std::filesystem::exists(path, ec)) {
+        // One set aside after a start that did not finish loading the shaders is tried once more
+        // (build 46): the player's was set aside so, likely after a start closed while loading,
+        // and every start since compiled all shaders anew. If that start does not finish
+        // either, the watchdog lets it go on and it is set aside for good.
+        auto bad = path;
+        bad += ".bad";
+        if (std::filesystem::exists(bad, ec) && !std::filesystem::exists(retried, ec)) {
+            { Common::FS::IOFile mark{retried, Common::FS::FileAccessMode::Create}; }
+            std::filesystem::rename(bad, path, ec);
+            if (!ec) {
+                LOG_INFO(Render_Vulkan,
+                         "The driver's pipeline cache set aside after an unfinished start is "
+                         "tried once more");
+            }
         }
     }
     if (!std::filesystem::exists(path, ec)) {
@@ -511,6 +536,10 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     if (!warm_up_stalled) {
         std::error_code ec;
         std::filesystem::remove(WarmUpMarkerPath(instance), ec);
+        // A start finished: a cache set aside later gets its one retry again.
+        auto retried = DriverCachePath(instance);
+        retried += ".bad.retried";
+        std::filesystem::remove(retried, ec);
     }
     SaveDriverCache();
     StartDriverCacheSaver();
