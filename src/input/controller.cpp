@@ -397,13 +397,15 @@ void GameController::UpdateEmulatedMotionLocked(u64 timestamp) {
     }
     m_last_motion_update = timestamp;
 
-    // Mouse rotation turns the controller around its own axes, as a wrist turns one: the game
-    // reads the gyro in the controller's axes, so left and right and up and down keep the same
-    // speed however far the controller has turned. Around the world axes, up and down turned
-    // into a roll the game does not paint with once the controller had turned sideways from a
-    // while of painting left and right, and got slow (build 45, stencil art). The tilt (G / H)
-    // is kept apart, see the gyro below.
-    m_emu_aim = Normalize(Multiply(m_emu_aim, FromRotationVector(m_emu_world_rate, dt)));
+    // Mouse rotation turns the controller as a mouse turns a camera: left and right around the
+    // world's up, up and down around the controller's own side axis, which so stays level. The
+    // game paints against gravity. Around the world axes alone, up and down turned into a roll
+    // once the controller had turned sideways, and got slow (build 45); around its own axes
+    // alone, the turns rolled it bit by bit, and straight down came out diagonal (build 46).
+    const float yaw_rate[3] = {0.0f, m_emu_world_rate[1], 0.0f};
+    const float own_rate[3] = {m_emu_world_rate[0], 0.0f, m_emu_world_rate[2]};
+    m_emu_aim = Normalize(Multiply(Multiply(FromRotationVector(yaw_rate, dt), m_emu_aim),
+                                   FromRotationVector(own_rate, dt)));
 
     // Tilting turns the controller over around its own Z axis, left side or right side down.
     const float target_roll =
