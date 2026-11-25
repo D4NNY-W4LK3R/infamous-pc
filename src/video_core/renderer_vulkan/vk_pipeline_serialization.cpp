@@ -382,9 +382,21 @@ void PipelineCache::WarmUp() {
     u32 num_pipelines{};
     u32 num_total_pipelines{};
 
+    // Handing the pipelines to the compiler threads waits whenever they are all busy, so with
+    // 10562 of them it took most of a 12-minute start, without the window handling Windows
+    // messages: clicking it then showed "Not Responding", and no progress was shown (build 45).
+    // It reports and handles messages every quarter of a second too (build 47).
+    auto last_pump = std::chrono::steady_clock::now();
+    Common::ReportStartupProgress("preparing shaders");
     Storage::DataBase::Instance().ForEachBlob(
         Storage::BlobType::PipelineKey, [&](std::vector<u8>&& data) {
             ++num_total_pipelines;
+            if (const auto now = std::chrono::steady_clock::now();
+                now - last_pump >= std::chrono::milliseconds(250)) {
+                last_pump = now;
+                Common::ReportStartupProgress(
+                    fmt::format("preparing shaders: {} read", num_total_pipelines));
+            }
 
             Serialization::Archive ar{std::move(data)};
             Serialization::Reader pldata{ar};
@@ -438,7 +450,7 @@ void PipelineCache::WarmUp() {
             if (ready >= total) {
                 break;
             }
-            if (now - last_report >= std::chrono::seconds(1)) {
+            if (now - last_report >= std::chrono::milliseconds(250)) {
                 last_report = now;
                 Common::ReportStartupProgress(
                     fmt::format("loading shaders {} of {} ({}%)", ready, total,

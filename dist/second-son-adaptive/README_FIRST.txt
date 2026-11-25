@@ -90,7 +90,8 @@ THE OPTIMIZER (F1)
   Scene switches (gameplay <-> cutscene, loading) are measured: the report lists the freezes
   and what they were spent on (shader compiling, loading data, shared memory, the card).
   Starting: the shaders you have met so far are loaded before the game starts, with the
-  progress in the window title ("loading shaders 2100 of 6918"). That can take a minute or two
+  progress in the window title ("preparing shaders: 4200 read", then "loading shaders 2100 of
+  6918"); since build 47 the window stays responsive the whole time. That can take a minute or two
   after the driver's own cache was reset - let it finish; nothing has to be renamed. Since
   build 46 the driver's cache is kept under 512 MB (it grows past 160 MB as you meet more of the game), and a
   start whose loading stops for 45 s goes on by itself and sets that cache aside next time.
