@@ -70,6 +70,9 @@ constexpr float TwoPi = 6.2831855f;
 constexpr float EmulatedTiltSpeed = TwoPi;
 constexpr float EmulatedShakeFrequency = 5.0f;
 constexpr float EmulatedShakeAmplitude = 2.0f * Gravity;
+// The wrist's turn in a rattle (build 54), in rad/s at its peak: about 5 degrees each way at
+// 5 shakes a second, back where it started after every shake, so the spray pointer only wobbles.
+constexpr float EmulatedShakeTurnRate = 3.0f;
 
 Quaternion Multiply(const Quaternion& a, const Quaternion& b) {
     return {a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
@@ -212,7 +215,8 @@ void GameController::SetEmulatedShake(bool shaking) {
         };
         LOG_INFO(Input,
                  "Shake: held {:.1f} s, the game read the pad {} times ({} reports), "
-                 "accelerometer it got in g: x {}, y {}, z {}; tilt {:.0f} deg",
+                 "accelerometer it got in g: x {}, y {}, z {}; tilt {:.0f} deg (all three axes "
+                 "and a wrist turn since build 54)",
                  held, seen.reads, seen.states, range(0), range(1), range(2),
                  seen.roll * 57.29578f);
     }
@@ -471,6 +475,14 @@ void GameController::UpdateEmulatedMotionLocked(u64 timestamp) {
         for (int i = 0; i < 3; ++i) {
             accel_buf[i] += shake[i] + side[i];
         }
+        // General shake (build 54): also along the controller's forward axis, which the tilt
+        // turns around and so stays its own z, and a small turn of the wrist. In build 52's log
+        // z never moved and the gyro read nothing during T, and some stencils still would not
+        // take a shake; a real rattle moves all three axes and turns a little too.
+        accel_buf[2] += EmulatedShakeAmplitude * swing;
+        const float turn = EmulatedShakeTurnRate * std::cos(m_emu_shake_phase);
+        gyro_buf[0] += turn;
+        gyro_buf[2] += turn;
     }
 }
 

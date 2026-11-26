@@ -225,7 +225,8 @@ TROUBLESHOOTING
   into a sideways motion the game does not count. Since build 44 holding G or H no longer turns
   the mouse's up and down around (stencil art works without P or tilting). Since build 45 T
   shakes along the controller's side axis too (its up when held like a spray can), and the log
-  gets a "Shake:" line for each press with what the game read. Since build 48 the mouse turns
+  gets a "Shake:" line for each press with what the game read. Since build 54 T shakes along
+  all three of the controller's axes with a small turn of the wrist, like a real rattle. Since build 48 the mouse turns
   the virtual controller like a camera: left and right around the world's up, up and down
   around its own side axis, so painting keeps its speed and straight lines stay straight.
   Experimental, build 44: F3 > Graphics > "Leave Empty Buffer Memory Out of Video Memory" (next
