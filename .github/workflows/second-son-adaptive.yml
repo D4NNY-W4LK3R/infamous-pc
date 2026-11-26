@@ -155,13 +155,14 @@ jobs:
           Copy-Item LICENSE $pkg/LICENSE.txt
           $hash = (Get-FileHash $pkg/shadPS4.exe -Algorithm SHA256).Hash
           "shadPS4.exe SHA256 $hash" | Out-File -Encoding ascii $pkg/SHA256.txt
-          Compress-Archive -Path "$pkg/*" -DestinationPath out/SecondSonAdaptive-windows-x64.zip -Force
+          # The build number is in the zip's name too, so downloads of different builds stay apart.
+          Compress-Archive -Path "$pkg/*" -DestinationPath "out/SecondSonAdaptive-windows-x64-build$env:GITHUB_RUN_NUMBER.zip" -Force
           Write-Output "exe sha256 $hash"
 
       - uses: actions/upload-artifact@v7
         with:
-          name: SecondSonAdaptive-windows-x64-${{ github.sha }}
-          path: out/SecondSonAdaptive-windows-x64.zip
+          name: SecondSonAdaptive-windows-x64-build${{ github.run_number }}-${{ github.sha }}
+          path: out/SecondSonAdaptive-windows-x64-build${{ github.run_number }}.zip
 
       - uses: actions/upload-artifact@v7
         with:
@@ -177,7 +178,7 @@ jobs:
           trap 'echo "::error title=release::line $LINENO: $BASH_COMMAND"' ERR
           short=$(git rev-parse --short=8 HEAD)
           tag="ssa-${GITHUB_REF_NAME//\//-}-${GITHUB_RUN_NUMBER}-${short}"
-          files=(out/SecondSonAdaptive-windows-x64.zip)
+          files=(out/SecondSonAdaptive-windows-x64-build${GITHUB_RUN_NUMBER}.zip)
           gh release create "$tag" "${files[@]}" --target "$GITHUB_SHA" --prerelease \
             --title "Second Son Adaptive build ${GITHUB_RUN_NUMBER} (${short})" \
-            --notes "Automated build of ${GITHUB_REF_NAME} at ${GITHUB_SHA}. Download SecondSonAdaptive-windows-x64.zip, extract it to E:\\SecondSonAdaptive\\Game and read README_FIRST.txt."
+            --notes "Automated build of ${GITHUB_REF_NAME} at ${GITHUB_SHA}. Download SecondSonAdaptive-windows-x64-build${GITHUB_RUN_NUMBER}.zip, extract it to E:\\SecondSonAdaptive\\Game and read README_FIRST.txt."
