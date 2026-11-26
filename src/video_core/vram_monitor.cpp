@@ -35,11 +35,18 @@ std::atomic<u32> raised_image_blocks{0};
 std::atomic<u64> lazy_zero_bytes{0};
 std::atomic<u64> lazy_wake_binds{0};
 std::atomic<u64> lazy_wake_unordered{0};
-std::atomic<bool> keep_rewritten_pages{false};
-std::atomic<s64> rewritten_pages_kept{0};
-std::atomic<u64> rewritten_upload_bytes{0};
+std::atomic<bool> shared_zero_on{false};
+std::atomic<u64> shared_zero_bound_blocks{0};
+std::atomic<u64> shared_zero_guard_wakes{0};
+std::atomic<u64> last_used_bytes{0};
+std::atomic<u64> last_budget_bytes{0};
+std::atomic<double> last_sample_seconds{0.0};
+std::atomic<u64> recent_peak_used_bytes{0};
 
 namespace {
+
+/// The GPU hang record counts seconds from its own start, which is static initialisation too.
+const auto monitor_launch = std::chrono::steady_clock::now();
 
 constexpr auto SampleInterval = std::chrono::seconds{2};
 constexpr int SamplesPerReport = 15; // 30 s
@@ -249,6 +256,8 @@ void Run(std::stop_token stop, const Vulkan::Instance* instance) {
     u64 shared_max = 0;
     int samples = 0;
     int windows_samples = 0;
+    u64 peak_this = 0;
+    u64 peak_before = 0;
     std::mutex mutex;
     std::condition_variable_any cv;
     while (true) {
@@ -275,19 +284,32 @@ void Run(std::stop_token stop, const Vulkan::Instance* instance) {
             }
         }
 #endif
-        if (++samples < SamplesPerReport) {
-            continue;
-        }
         u64 used = 0;
         u64 budget = 0;
-        std::string heaps;
         const auto all = instance->GetHeapUsage();
-        for (std::size_t i = 0; i < all.size(); ++i) {
-            const auto& h = all[i];
+        for (const auto& h : all) {
             if (h.device_local) {
                 used += h.usage;
                 budget += h.budget;
             }
+        }
+        // Every 2 s, for the GPU hang record (build 52): the peak is over this report and the
+        // one before, so about the last 30 to 60 s.
+        last_used_bytes.store(used);
+        last_budget_bytes.store(budget);
+        last_sample_seconds.store(
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - monitor_launch)
+                .count());
+        peak_this = std::max(peak_this, used);
+        recent_peak_used_bytes.store(std::max(peak_this, peak_before));
+        if (++samples < SamplesPerReport) {
+            continue;
+        }
+        peak_before = peak_this;
+        peak_this = 0;
+        std::string heaps;
+        for (std::size_t i = 0; i < all.size(); ++i) {
+            const auto& h = all[i];
             heaps += fmt::format("{}{} {}: {}/{} of {} MB", heaps.empty() ? "" : ", ",
                                  h.device_local ? "video" : "system", i, h.usage / MB,
                                  h.budget / MB, h.size / MB);
@@ -306,21 +328,16 @@ void Run(std::stop_token stop, const Vulkan::Instance* instance) {
         }
         LOG_INFO(Render,
                  "VRAM: Vulkan video memory in use {} MB of a {} MB budget ({}); buffers made "
-                 "resident {} MB ({} MB left out as zeros; {} binds of them waited for earlier "
-                 "work, {} could not), images {} MB in {}, {} memory blocks raised for images "
-                 "drawn to; {}",
+                 "resident {} MB ({} MB left out as zeros, bound to {}; {} binds of them waited "
+                 "for earlier work, {} could not; {} GPU writes found on the shared zeros), "
+                 "images {} MB in {}, {} memory blocks raised for images drawn to; {}",
                  used / MB, budget / MB, heaps, buffer_resident_bytes.load() / MB,
-                 lazy_zero_bytes.load() / MB, lazy_wake_binds.load(), lazy_wake_unordered.load(),
+                 lazy_zero_bytes.load() / MB,
+                 shared_zero_on.load() ? "the shared block of zeros" : "nothing",
+                 lazy_wake_binds.load(), lazy_wake_unordered.load(),
+                 shared_zero_guard_wakes.load(),
                  image_bytes.load() / MB, image_count.load(), raised_image_blocks.load(),
                  windows_text);
-        if (keep_rewritten_pages.load(std::memory_order_relaxed)) {
-            LOG_INFO(Render,
-                     "Rewritten pages: {} pages ({} MB) kept unprotected, {} MB uploaded since "
-                     "the last line because they were (experiment)",
-                     std::max<s64>(rewritten_pages_kept.load(), 0),
-                     std::max<s64>(rewritten_pages_kept.load(), 0) * 4 / 1024,
-                     rewritten_upload_bytes.exchange(0) / MB);
-        }
         samples = 0;
         windows_samples = 0;
         engine_sum_max.clear();

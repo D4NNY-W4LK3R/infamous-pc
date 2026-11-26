@@ -23,10 +23,10 @@
 //   empty_memory_out = 1   leave empty buffer memory out of video memory (next launch;
 //                          SS_LAZY_ZERO_MEMORY). On by default since build 51; the older key
 //                          lazy_zero_memory is read no more, so every setup starts with it on.
-//   early_copy_back = 0    experiment: copy back what game threads read right after the GPU
-//                          wrote it (next launch; SS_EARLY_COPY_BACK)
-//   keep_rewritten_pages = 0  experiment: pages written every frame stay unprotected (next
-//                          launch; SS_KEEP_REWRITTEN_PAGES)
+//   early_copy_back, keep_rewritten_pages: build 51 experiments, removed in build 52 (ignored)
+//   cheat_infinite_energy = 0 ... cheat_infinite_video_dash = 0  cheats kept on from launch to
+//                          launch (F1 > Cheats; build 52); 1 = on at every launch
+//   cheat_smoke_dash = 1   Smoke dash length kept on, 1 (off) to 5 times
 //   vram_priorities = 0    memory priorities for the driver: buffers highest, images drawn to
 //                          next, textures last (next launch; SS_VRAM_PRIORITIES)
 //
@@ -35,6 +35,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -45,6 +46,12 @@
 #include "adaptive/contracts.h"
 
 namespace Adaptive {
+
+/// Settings keys of the cheats kept on, in the order of Core::SecondSonCheats::Id (the Smoke
+/// dash, last, has its own key with its length).
+inline constexpr std::array<const char*, 6> CheatKeys = {
+    "cheat_infinite_energy",   "cheat_infinite_bombs",      "cheat_infinite_shards",
+    "cheat_infinite_finisher", "cheat_infinite_neon_dash", "cheat_infinite_video_dash"};
 
 struct UserSettings {
     bool enabled = true;
@@ -70,11 +77,10 @@ struct UserSettings {
     /// Empty buffer memory left out of video memory (build 44, next launch): blocks of the large
     /// ranges the game reads that hold only zeros are not made resident until data lands there.
     bool lazy_zero_memory = true;
-    /// Experiments (build 51, next launch, off by default): copy back the memory game threads
-    /// read back right after the GPU work that writes it; keep pages the game writes again every
-    /// frame unprotected and upload them every frame.
-    bool early_copy_back = false;
-    bool keep_rewritten_pages = false;
+    /// Cheats kept on from launch to launch (build 52): bit i = CheatKeys[i]; and the Smoke
+    /// dash length kept (1 = off).
+    std::uint32_t cheats_kept_on = 0;
+    float smoke_dash_kept = 1.0f;
     std::vector<std::string> warnings; ///< unknown keys, bad values (not fatal)
 };
 

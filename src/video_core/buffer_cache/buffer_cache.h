@@ -72,6 +72,9 @@ class BufferCache {
     /// Buffers read from at least this large are uploaded once until the game could next have
     /// written them for the GPU, see LargeReadSynced.
     static constexpr u64 LARGE_READ_THRESHOLD = 64_MB;
+    /// The shared block of zeros blocks left out are bound to (build 52): one bind covers this
+    /// much at most.
+    static constexpr u64 SHARED_ZERO_SIZE = 2_MB;
 
 public:
     explicit BufferCache(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler,
@@ -204,20 +207,10 @@ public:
     /// on the GPU (build 51).
     void PrepareArenaBinds();
 
-    /// Copies back the windows game threads read that the work recorded last wrote (build 51
-    /// experiment, F3). Called before each draw and dispatch and on fences.
-    void CopyBackWrittenHotWindows() {
-        if (!early_written.empty()) {
-            CopyBackWrittenHotWindowsSlow();
-        }
-    }
-
     /// Commits pending sparse buffer memory binds. Must be called before every scheduler submit.
     void SubmitPendingArenaBinds(Vulkan::SubmitInfo& info);
 
 private:
-    void CopyBackWrittenHotWindowsSlow();
-
     using DownloadCopies = boost::container::small_vector<vk::BufferCopy, 8>;
 
     /// A copy of GPU modified memory back to the game, recorded and submitted by the GPU thread
@@ -289,6 +282,10 @@ private:
     void WakeBlocks(const Buffer* arena, const IntervalList<>& blocks);
     void UploadAhead(const Buffer* arena, const IntervalList<>& blocks);
     void PublishLazyZero();
+    /// Build 52: creates the shared block of zeros. False when it can't be.
+    bool CreateSharedZeros();
+    /// Build 52: binds blocks left out as zeros to the shared block of zeros.
+    void BindSharedZeros(const Buffer* arena, const IntervalList<>& blocks);
 
     /// Returns device memory and an offset into it to back size bytes of arena blocks.
     std::pair<vk::DeviceMemory, u64> AllocateResidency(u64 size);
@@ -389,23 +386,14 @@ private:
         /// Chances to copy it ahead skipped after copies of it went stale, and still to skip.
         u8 backoff{};
         u8 skip{};
-        /// Frame it was last copied back right after the work writing it (build 51).
-        u64 early_frame{~u64{0}};
     };
     std::vector<HotWindow> hot_windows;
-    /// Experiment (build 51): windows game threads read back that the work just recorded wrote,
-    /// copied back right after it so the copy is done before the game reads.
-    bool early_copy_back{};
-    u64 kept_pages_frame{};
-    boost::container::small_vector<std::pair<VAddr, VAddr>, 4> early_written;
     struct ReadbackStats {
         u64 on_fault{};
         u64 joined{};
         u64 prefetched{};
         u64 written_ahead{};
         u64 skipped{};
-        /// Copies made right after the work that wrote them (build 51 experiment).
-        u64 early{};
         /// Time from game threads asking for copies back to the GPU thread taking them up.
         u64 pickup_ns{};
         u64 pickups{};
@@ -474,6 +462,8 @@ private:
     /// The pending binds make blocks resident that work already sent may read as zeros: binding
     /// them before that work is done gives it undefined memory in place of zeros (build 51).
     bool pending_binds_wake_lazy{};
+    /// The pending binds bind blocks to the shared block of zeros (build 52), for the hang record.
+    bool pending_binds_zero{};
     /// Graphics tick the next bind waits for, set by PrepareArenaBinds; 0 when none.
     u64 bind_wait_tick{};
     /// SS_LAZY_ZERO_ORDERED=0 binds woken blocks without waiting, as before build 51.
@@ -497,6 +487,13 @@ private:
     /// Blocks of large ranges read from that are not resident and taken as zeros (build 44).
     IntervalList<> lazy_zero_blocks;
     bool lazy_zero_enabled{};
+    /// Build 52: blocks left out as zeros are bound to one shared block of zeros instead of
+    /// to nothing, so the card never reads memory with nothing behind it (needs
+    /// sparseResidencyAliased; SS_LAZY_ZERO_SHARED=0 = the build 51 way). Blocks the GPU writes
+    /// are made resident with memory of their own first, as before.
+    bool lazy_zero_shared{};
+    vk::DeviceMemory shared_zero_memory{};
+    u64 shared_zero_size{};
     u64 lazy_zero_generation{};
     u64 lazy_zero_skipped_bytes{};
     struct LazyCoverHint {

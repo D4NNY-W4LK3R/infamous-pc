@@ -54,6 +54,17 @@ constexpr u64 NumOps = 128;
 std::array<Op, NumOps> ops{};
 std::atomic<u64> next_op{1};
 
+/// The last shader and pipeline compiles (build 52).
+struct Compile {
+    std::atomic<u64> n{0};
+    u64 hash{};
+    float t{};
+    const char* kind{};
+};
+constexpr u64 NumCompiles = 64;
+std::array<Compile, NumCompiles> compiles{};
+std::atomic<u64> next_compile{1};
+
 vk::Device device_handle{};
 vk::Queue graphics_queue{};
 vk::Queue compute_queue{};
@@ -96,6 +107,8 @@ std::string_view OpName(QueueOp op) {
         return "sparse bind (empty buffer memory left out), blocks";
     case QueueOp::Present:
         return "present, frame";
+    case QueueOp::SparseBindZeros:
+        return "sparse bind, also to the shared block of zeros, binds";
     }
     return "?";
 }
@@ -283,6 +296,16 @@ void NoteQueueOp(QueueOp op, u64 value, u64 extra) noexcept {
     o.n.store(n, std::memory_order_release);
 }
 
+void NoteCompile(const char* kind, u64 hash) noexcept {
+    const u64 n = next_compile.fetch_add(1, std::memory_order_relaxed);
+    Compile& c = compiles[n % NumCompiles];
+    c.n.store(0, std::memory_order_relaxed);
+    c.kind = kind;
+    c.hash = hash;
+    c.t = static_cast<float>(SecondsSinceLaunch());
+    c.n.store(n, std::memory_order_release);
+}
+
 void OnDeviceLost(std::string_view where) noexcept {
     std::call_once(record_once, [where] {
         std::vector<std::string> lines;
@@ -296,6 +319,44 @@ void OnDeviceLost(std::string_view where) noexcept {
             VideoCore::VramMonitor::image_count.load(),
             VideoCore::VramMonitor::image_bytes.load() >> 20,
             VideoCore::VramMonitor::lazy_zero_bytes.load() >> 20));
+        {
+            // Build 52: how far over the budget video memory was, as of the monitor's last look
+            // (every 2 s), and how the blocks left out were bound.
+            namespace VM = VideoCore::VramMonitor;
+            const u64 used = VM::last_used_bytes.load();
+            const u64 budget = VM::last_budget_bytes.load();
+            const double age = SecondsSinceLaunch() - VM::last_sample_seconds.load();
+            if (budget != 0) {
+                lines.push_back(fmt::format(
+                    "VRAM: {} MB in use of a {} MB budget {:.1f} s before ({}{} MB), highest in "
+                    "the last minute {} MB",
+                    used >> 20, budget >> 20, age, used >= budget ? "over by " : "under by ",
+                    (used >= budget ? used - budget : budget - used) >> 20,
+                    VM::recent_peak_used_bytes.load() >> 20));
+            } else {
+                lines.push_back("VRAM: no budget reading yet");
+            }
+            lines.push_back(fmt::format(
+                "empty buffer memory left out bound to: {}; {} blocks bound to it in all, {} "
+                "GPU writes found on it and woken first",
+                VM::shared_zero_on.load() ? "the shared block of zeros" : "nothing (build 51 way)",
+                VM::shared_zero_bound_blocks.load(), VM::shared_zero_guard_wakes.load()));
+            const double now = SecondsSinceLaunch();
+            const u64 last_compile = next_compile.load(std::memory_order_acquire);
+            std::vector<std::string> recent;
+            for (u64 n = last_compile > NumCompiles ? last_compile - NumCompiles : 1;
+                 n < last_compile; ++n) {
+                const Compile& c = compiles[n % NumCompiles];
+                if (c.n.load(std::memory_order_acquire) != n || now - c.t > 10.0) {
+                    continue;
+                }
+                recent.push_back(fmt::format("  {:.3f} s ({:.1f} s before) {} {:#x}", c.t,
+                                             now - c.t, c.kind ? c.kind : "?", c.hash));
+            }
+            lines.push_back(
+                fmt::format("shader and pipeline compiles in the last 10 s: {}", recent.size()));
+            lines.insert(lines.end(), recent.begin(), recent.end());
+        }
         try {
             if (!checkpoints_on) {
                 lines.push_back("checkpoints: off, so the work running is not known");

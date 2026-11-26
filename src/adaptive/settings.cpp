@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 
@@ -126,12 +128,26 @@ UserSettings ParseSettings(const std::string& text) {
             // Build 44-50 name, when the switch was off by default: build 51 turns it on once.
             continue;
         } else if (key == "early_copy_back" || key == "keep_rewritten_pages") {
+            // Build 51 experiments, removed in build 52: no gain (and keep_rewritten_pages made
+            // buildings vanish). Ignored if a settings file still has them.
+            continue;
+        } else if (const auto cheat = std::find(CheatKeys.begin(), CheatKeys.end(), key);
+                   cheat != CheatKeys.end()) {
             const auto b = ParseBool(value);
             if (!b) {
                 s.warnings.push_back(key + " '" + value + "' is not 0/1");
                 continue;
             }
-            (key == "early_copy_back" ? s.early_copy_back : s.keep_rewritten_pages) = *b;
+            const auto bit = 1u << static_cast<unsigned>(cheat - CheatKeys.begin());
+            s.cheats_kept_on = *b ? (s.cheats_kept_on | bit) : (s.cheats_kept_on & ~bit);
+        } else if (key == "cheat_smoke_dash") {
+            char* end = nullptr;
+            const float v = std::strtof(value.c_str(), &end);
+            if (end == value.c_str() || *end != '\0' || !(v >= 1.0f && v <= 5.0f)) {
+                s.warnings.push_back("cheat_smoke_dash must be 1 (off) to 5");
+                continue;
+            }
+            s.smoke_dash_kept = v;
         } else if (key == "empty_memory_out") {
             const auto b = ParseBool(value);
             if (!b) {
@@ -195,10 +211,16 @@ std::string SerializeSettings(const UserSettings& s) {
     o << "# leave empty buffer memory out of video memory until data lands there (F3 settings >\n"
          "# Graphics; next launch; on by default since build 51)\n";
     o << "empty_memory_out = " << (s.lazy_zero_memory ? 1 : 0) << '\n';
-    o << "# experiments (F3 settings > Graphics; next launch): copy back what the game reads\n"
-         "# right after the GPU wrote it; keep pages written every frame unprotected\n";
-    o << "early_copy_back = " << (s.early_copy_back ? 1 : 0) << '\n';
-    o << "keep_rewritten_pages = " << (s.keep_rewritten_pages ? 1 : 0) << '\n';
+    o << "# cheats kept on from launch to launch (F1 > Cheats \"keep on\"): 1 = on at every\n"
+         "# launch. cheat_smoke_dash: the Smoke dash length kept, 1 (off) to 5 times\n";
+    for (std::size_t i = 0; i < CheatKeys.size(); ++i) {
+        o << CheatKeys[i] << " = " << ((s.cheats_kept_on >> i) & 1u) << '\n';
+    }
+    {
+        char smoke[16];
+        std::snprintf(smoke, sizeof(smoke), "%.1f", static_cast<double>(s.smoke_dash_kept));
+        o << "cheat_smoke_dash = " << smoke << '\n';
+    }
     o << "# frame-rate target: the optimizer picks the performance mode per launch, from\n"
          "# perf_mode (your choice) down to auto_perf_max (off | low | office); 0 = off\n";
     o << "fps_target = " << s.fps_target << '\n';
@@ -233,16 +255,6 @@ UserSettings LoadSettings(const std::filesystem::path& file,
             s.perf_mode = parsed.perf_mode;
         } else {
             s.warnings.push_back("SHADPS4_PERF_MODE '" + *v + "' must be off, low or office");
-        }
-    }
-    if (const auto v = env("SS_EARLY_COPY_BACK")) {
-        if (const auto b = ParseBool(*v)) {
-            s.early_copy_back = *b;
-        }
-    }
-    if (const auto v = env("SS_KEEP_REWRITTEN_PAGES")) {
-        if (const auto b = ParseBool(*v)) {
-            s.keep_rewritten_pages = *b;
         }
     }
     if (const auto v = env("SS_LAZY_ZERO_MEMORY")) {

@@ -52,6 +52,7 @@ set(ADAPTIVE_SOURCES
     ${SRC}/adaptive/telemetry.cpp
     ${SRC}/input/camera_hook_signature.cpp
     ${SRC}/core/second_son_patches.cpp
+    ${SRC}/core/second_son_cheats.cpp
     ${SRC}/common/shared_user_dir.cpp
     ${SRC}/input/touch_grip.cpp
 )
@@ -75,6 +76,7 @@ add_executable(adaptive_tests
     test_mini_brains.cpp
     test_settings.cpp
     test_second_son_patches.cpp
+    test_second_son_cheats.cpp
     test_shared_user_dir.cpp
     test_touch_grip.cpp
     test_stencil_probe.cpp

@@ -29,6 +29,11 @@ struct VmaAllocationInfo;
 namespace VideoCore {
 
 /// Hints and requirements for the backing memory type of a commit
+/// Build 52: sparse buffers (the arenas) are created able to share memory between their blocks,
+/// so blocks left out as zeros can all be bound to one block of zeros. Set by the buffer cache
+/// before the first arena is created.
+inline bool g_sparse_aliased_arenas = false;
+
 enum class MemoryType : u8 {
     DeviceLocal,  ///< Requests device local buffer.
     HostUncached, ///< Requires a host visible memory type optimized for CPU to GPU uploads

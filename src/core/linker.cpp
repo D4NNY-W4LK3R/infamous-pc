@@ -28,6 +28,7 @@
 #include "core/memory.h"
 #include "core/mouse_aim.h"
 #include "core/stencil_probe.h"
+#include "core/second_son_cheats.h"
 #include "core/second_son_patches.h"
 #include "core/tls.h"
 #include "ipc/ipc.h"
@@ -222,6 +223,9 @@ void Linker::Execute(const std::vector<std::string>& args) {
             Adaptive::Glue::NoteGamePatchesApplied(
                 Core::SecondSonPatches::Applied().late_read);
         }
+        // Cheats (F1 > Cheats, build 52): checked against the code as it is now, with the
+        // emulator's own patches in; the ones kept on are switched on here.
+        Core::SecondSonCheats::Init(module->GetBaseAddress(), module->aligned_base_size);
 #endif
 
         // Add all guest arguments, we will always have the executable path in argv[0]

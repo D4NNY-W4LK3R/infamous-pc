@@ -959,6 +959,8 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/debugger.cpp
          src/core/debugger.h
          src/core/linker.cpp
+         src/core/second_son_cheats.cpp
+         src/core/second_son_cheats.h
          src/core/second_son_patches.cpp
          src/core/second_son_patches.h
          src/core/mouse_aim.cpp

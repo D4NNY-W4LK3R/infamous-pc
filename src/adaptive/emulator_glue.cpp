@@ -349,6 +349,12 @@ void SetPowerNote(const std::string& note) {
     }
 }
 
+void SetCheatsNote(const std::string& note) {
+    if (g_brain) {
+        g_brain->SetCheatsNote(note);
+    }
+}
+
 void ReportVulkanDevice(const std::string& name, std::uint32_t vendor_id, std::uint32_t device_id,
                         std::uint32_t driver_version, std::uint32_t api_version,
                         std::uint64_t device_local_bytes, std::uint64_t budget_bytes,
@@ -582,21 +588,63 @@ void SetFlag(bool on, const char* what) {
 }
 } // namespace
 
-bool EarlyCopyBack() {
-    return GetFlag<&UserSettings::early_copy_back>();
+namespace {
+/// Reads the settings (the live copy once the optimizer has loaded them), changes them and
+/// saves them (build 52, cheats kept on).
+template <class Change>
+void ChangeSettings(Change&& change) {
+    const auto dir =
+        g_dir.empty() ? Common::FS::GetUserPath(Common::FS::PathType::UserDir) / "adaptive" : g_dir;
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    UserSettings s = g_dir.empty() ? LoadSettings(dir / "settings.ini",
+                                                  [](const std::string&) { return std::nullopt; })
+                                   : g_settings;
+    if (!change(s)) {
+        return;
+    }
+    SaveSettings(dir / "settings.ini", s);
+    if (!g_dir.empty()) {
+        g_settings.cheats_kept_on = s.cheats_kept_on;
+        g_settings.smoke_dash_kept = s.smoke_dash_kept;
+    }
 }
 
-void SetEarlyCopyBack(bool on) {
-    SetFlag<&UserSettings::early_copy_back>(on, "Early copy back (experiment)");
+} // namespace
+
+std::uint32_t CheatsKeptOn() {
+    return CurrentSettings().cheats_kept_on;
 }
 
-bool KeepRewrittenPages() {
-    return GetFlag<&UserSettings::keep_rewritten_pages>();
+float SmokeDashKept() {
+    return CurrentSettings().smoke_dash_kept;
 }
 
-void SetKeepRewrittenPages(bool on) {
-    SetFlag<&UserSettings::keep_rewritten_pages>(
-        on, "Pages written every frame kept unprotected (experiment)");
+void SetCheatKeptOn(unsigned index, bool on) {
+    if (index >= CheatKeys.size()) {
+        return;
+    }
+    ChangeSettings([&](UserSettings& s) {
+        const std::uint32_t bit = 1u << index;
+        const std::uint32_t next = on ? (s.cheats_kept_on | bit) : (s.cheats_kept_on & ~bit);
+        if (next == s.cheats_kept_on) {
+            return false;
+        }
+        s.cheats_kept_on = next;
+        return true;
+    });
+    LOG_INFO(Core, "Cheat {}: kept on from launch to launch {}", CheatKeys[index],
+             on ? "on" : "off");
+}
+
+void SetSmokeDashKept(float scale) {
+    ChangeSettings([&](UserSettings& s) {
+        if (s.smoke_dash_kept == scale) {
+            return false;
+        }
+        s.smoke_dash_kept = scale;
+        return true;
+    });
 }
 
 bool LazyZeroMemory() {

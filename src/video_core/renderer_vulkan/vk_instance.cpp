@@ -492,6 +492,8 @@ bool Instance::CreateDevice() {
                 .shaderInt16 = features.shaderInt16,
                 .sparseBinding = features.sparseBinding,
                 .sparseResidencyBuffer = features.sparseResidencyBuffer,
+                // Build 52: blocks left out as zeros are bound to one shared block of zeros.
+                .sparseResidencyAliased = features.sparseResidencyAliased,
             },
         },
         vk::PhysicalDeviceVulkan11Features{

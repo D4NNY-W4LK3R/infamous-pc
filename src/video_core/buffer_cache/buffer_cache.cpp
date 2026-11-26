@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <thread>
+#include <fmt/format.h>
 #include <magic_enum/magic_enum.hpp>
 
 #include "adaptive/emulator_glue.h"
@@ -113,9 +114,25 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
       stream_buffer{instance, scheduler, MemoryType::Stream, STREAM_BUFFER_SIZE},
       gds_buffer{instance, 0, GDS_BUFFER_SIZE, MemoryType::Stream, "GDS Buffer"},
       memory_semaphore{instance} {
+    // Memory waiting as zeros (build 44) relies on reads of memory that is not resident giving
+    // zeros. Build 52 binds it to one shared block of zeros where the card allows it, so arenas
+    // are created able to share memory between their blocks then, before the first one.
+    const bool zeros_guaranteed = instance.GetPhysicalDevice()
+                                      .getProperties()
+                                      .sparseProperties.residencyNonResidentStrict;
+    lazy_zero_enabled = Adaptive::Glue::LazyZeroMemory() && zeros_guaranteed;
+    const char* shared_env = std::getenv("SS_LAZY_ZERO_SHARED");
+    const bool shared_off = shared_env && shared_env[0] == '0';
+    const bool aliased_supported = instance.IsSparseResidencyAliasedSupported();
+    lazy_zero_shared = lazy_zero_enabled && !shared_off && aliased_supported;
+    g_sparse_aliased_arenas = lazy_zero_shared;
+    vk::BufferCreateFlags arena_flags =
+        vk::BufferCreateFlagBits::eSparseBinding | vk::BufferCreateFlagBits::eSparseResidency;
+    if (lazy_zero_shared) {
+        arena_flags |= vk::BufferCreateFlagBits::eSparseAliased;
+    }
     const vk::BufferCreateInfo probe_ci = {
-        .flags =
-            vk::BufferCreateFlagBits::eSparseBinding | vk::BufferCreateFlagBits::eSparseResidency,
+        .flags = arena_flags,
         .size = ARENA_PAGE_SIZE,
         .usage = ARENA_USAGE,
         .sharingMode = vk::SharingMode::eExclusive,
@@ -151,28 +168,31 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     readback_thread = std::jthread{[this](std::stop_token token) { ReadbackThread(token); }};
 
     sync_large_reads_once = EmulatorSettings.IsSyncLargeReadsOnce();
-    // Memory waiting as zeros (F3, experimental, build 44) relies on reads of memory that is not
-    // resident giving zeros.
-    const bool zeros_guaranteed = instance.GetPhysicalDevice()
-                                      .getProperties()
-                                      .sparseProperties.residencyNonResidentStrict;
-    lazy_zero_enabled = Adaptive::Glue::LazyZeroMemory() && zeros_guaranteed;
     LOG_INFO(Render, "Empty buffer memory left out of video memory: {}",
              lazy_zero_enabled ? "on"
              : zeros_guaranteed
                  ? "off (F3 to turn on, next launch)"
                  : "not available (the driver does not promise zeros for memory left out)");
+    if (lazy_zero_shared && !CreateSharedZeros()) {
+        // No arena exists yet: they are created without the shared flag from here on.
+        lazy_zero_shared = false;
+        g_sparse_aliased_arenas = false;
+    }
+    if (lazy_zero_enabled) {
+        LOG_INFO(Render, "Shared block of zeros for empty buffer memory left out: {}",
+                 lazy_zero_shared ? fmt::format("on ({} MB)", shared_zero_size >> 20)
+                 : shared_off     ? std::string{"off (SS_LAZY_ZERO_SHARED=0, build 51 way)"}
+                 : !aliased_supported
+                     ? std::string{"not available (the card does not report "
+                                   "sparseResidencyAliased), build 51 way"}
+                     : std::string{"not available (creating it failed), build 51 way"});
+    }
+    VideoCore::VramMonitor::shared_zero_on.store(lazy_zero_shared);
     if (const char* ordered = std::getenv("SS_LAZY_ZERO_ORDERED"); ordered && ordered[0] == '0') {
         lazy_wake_ordered = false;
         LOG_INFO(Render, "Woken empty buffer memory is bound without waiting for earlier work "
                          "(SS_LAZY_ZERO_ORDERED=0)");
     }
-    VideoCore::VramMonitor::keep_rewritten_pages.store(Adaptive::Glue::KeepRewrittenPages());
-    LOG_INFO(Render, "Experiment, pages written every frame kept unprotected: {}",
-             VideoCore::VramMonitor::keep_rewritten_pages.load() ? "on" : "off (F3 > Graphics)");
-    early_copy_back = Adaptive::Glue::EarlyCopyBack();
-    LOG_INFO(Render, "Experiment, copy back right after the GPU writes: {}",
-             early_copy_back ? "on" : "off (F3 > Graphics)");
     defer_uploads = EmulatorSettings.IsUploadThread();
     if (defer_uploads) {
         upload_thread = std::jthread{[this](std::stop_token token) { UploadThread(token); }};
@@ -380,15 +400,6 @@ void BufferCache::NoteComputeWriteTick(u64 tick) noexcept {
 }
 
 void BufferCache::TickFrame() {
-    // Pages kept unprotected change without faulting: memory read freely is synced again once a
-    // frame while there are any (build 51 experiment).
-    if (VideoCore::VramMonitor::rewritten_pages_kept.load(std::memory_order_relaxed) > 0) {
-        const u64 frame = Common::Perf::FrameNumber();
-        if (frame != kept_pages_frame) {
-            kept_pages_frame = frame;
-            cpu_modified_generation.fetch_add(1, std::memory_order_release);
-        }
-    }
     if (std::exchange(fault_process_pending, false)) {
         fault_manager->ProcessFaultBuffer();
     }
@@ -656,56 +667,6 @@ std::shared_ptr<BufferCache::Readback> BufferCache::RecordReadback(const Buffer*
     return readback;
 }
 
-void BufferCache::CopyBackWrittenHotWindowsSlow() {
-    // Game threads waited for copies back that were made ahead but not run yet: the GPU was 9.5
-    // ms behind, and the copy queued behind all of it (build 50). The memory they read back is
-    // copied right after the work that wrote it, in its command buffer, which is then submitted,
-    // so it is mostly done when the game reads. Once a frame a window at most.
-    const u64 frame = Common::Perf::FrameNumber();
-    boost::container::small_vector<std::shared_ptr<Readback>, 4> made;
-    bool on_graphics = false;
-    bool on_async = false;
-    for (const auto& written : early_written) {
-        const VAddr start = written.first;
-        const VAddr end = written.second;
-        const auto hot = std::ranges::find_if(hot_windows, [&](const HotWindow& window) {
-            return window.start == start && window.end == end;
-        });
-        if (hot == hot_windows.end() || hot->early_frame == frame) {
-            continue;
-        }
-        const bool in_flight = std::ranges::any_of(readbacks, [&](const auto& readback) {
-            return !readback->Done() && !readback->stale && readback->start <= start &&
-                   end <= readback->end;
-        });
-        if (in_flight || !memory_tracker->IsRegionGpuModified(start, end - start)) {
-            continue;
-        }
-        const auto [arena, window_start, window_end] = GetReadbackWindow(start, end - start);
-        if (const auto readback = RecordReadback(arena, window_start, window_end)) {
-            hot->early_frame = frame;
-            readback->prefetched = true;
-            ++readback_stats.early;
-            if (readback->semaphore == scheduler.GetWorkSemaphore()) {
-                on_graphics = true;
-            } else {
-                on_async = true;
-            }
-            made.push_back(readback);
-        }
-    }
-    early_written.clear();
-    if (made.empty()) {
-        return;
-    }
-    SubmitReadbacks(on_graphics, on_async);
-    {
-        std::scoped_lock lock{finished_readbacks_mutex};
-        finished_readbacks.insert(finished_readbacks.end(), made.begin(), made.end());
-    }
-    finished_readbacks_cv.notify_one();
-}
-
 void BufferCache::PrefetchReadbacks() {
     ApplyFinishedReadbacks();
     static const bool prefetch_off = Common::Tune("SHAD_PREFETCH_OFF", 0) != 0;
@@ -772,12 +733,6 @@ void BufferCache::PrefetchReadbacks() {
     if (now - last_readback_report >= std::chrono::seconds{10}) {
         last_readback_report = now;
         const double pickups = static_cast<double>(std::max<u64>(readback_stats.pickups, 1));
-        if (early_copy_back) {
-            LOG_INFO(Render,
-                     "Readbacks: {} copied right after the work that wrote them "
-                     "(experiment)",
-                     readback_stats.early);
-        }
         LOG_INFO(Render,
                  "Readbacks: {} on game thread faults, {} of those waited for a copy already "
                  "made, {} made ahead, {} written back before the game touched them, {} skipped "
@@ -1126,6 +1081,20 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         EnsureResidentLazy(arena, first_block, last_block);
     } else {
         EnsureResident(arena, first_block, last_block);
+        // Build 52 guard: a GPU write must never land on the shared block of zeros. Memory
+        // written is made resident with its own memory above, which takes its blocks out of
+        // those left out; should one ever still be, it is woken and logged.
+        if (is_written && lazy_zero_shared && !lazy_zero_blocks.Empty() &&
+            lazy_zero_blocks.Overlaps(first_block, last_block + 1)) {
+            const u64 n = VideoCore::VramMonitor::shared_zero_guard_wakes.fetch_add(1) + 1;
+            if (n <= 10 || n % 1000 == 0) {
+                LOG_WARNING(Render,
+                            "Shared block of zeros: memory written at {:#x} ({} bytes) was "
+                            "still bound to it, woken first ({} times so far)",
+                            device_addr, size, n);
+            }
+            WakeLazyZero(arena, device_addr, size);
+        }
     }
     bool copied_back = false;
     if (is_written) {
@@ -1160,15 +1129,6 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     }
     if (is_written) {
         MarkGpuModifiedRange(device_addr, size);
-        if (early_copy_back && size <= 16_MB) {
-            for (const auto& window : hot_windows) {
-                if (window.start < device_addr + size && device_addr < window.end &&
-                    std::ranges::find(early_written, std::pair{window.start, window.end}) ==
-                        early_written.end()) {
-                    early_written.emplace_back(window.start, window.end);
-                }
-            }
-        }
     }
     return {arena, arena->Offset(device_addr)};
 }
@@ -1361,6 +1321,15 @@ const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
             .memoryOffset = (backing.offset + start - backing.start) << block_shift,
         });
     });
+    if (lazy_zero_shared) {
+        IntervalList<> zeros;
+        lazy_zero_blocks.ForEachInRange(base_block, end_block, [&](const Interval& lazy) {
+            zeros.Add({std::max(base_block, lazy.start), std::min(end_block, lazy.end)});
+        });
+        if (!zeros.Empty()) {
+            BindSharedZeros(new_arena, zeros);
+        }
+    }
 
     u64 base_page = first_addr >> ARENA_PAGE_BITS;
     for (u32 page = 0; page < (first_size >> ARENA_PAGE_BITS); ++page) {
@@ -1492,6 +1461,92 @@ void BufferCache::PublishLazyZero() {
     VideoCore::VramMonitor::lazy_zero_bytes.store(blocks << block_shift);
 }
 
+bool BufferCache::CreateSharedZeros() {
+    // One small block of video memory, cleared once, that every block left out as zeros is bound
+    // to (build 52). Reads of them give its zeros, as before, but through memory that exists:
+    // the device lost after 32, 44 and 64 minutes came with the switch on only, and work reading
+    // memory with nothing behind it while binds changed is the leading suspect.
+    const auto device = instance.GetDevice();
+    shared_zero_size = Common::AlignUp(std::max<u64>(SHARED_ZERO_SIZE, block_size), block_size);
+    const vk::BufferCreateInfo buffer_ci = {
+        .size = shared_zero_size,
+        .usage = vk::BufferUsageFlagBits::eTransferDst,
+        .sharingMode = vk::SharingMode::eExclusive,
+    };
+    auto buffer_result = device.createBuffer(buffer_ci);
+    if (buffer_result.result != vk::Result::eSuccess) {
+        LOG_WARNING(Render, "Shared block of zeros: creating its buffer failed ({})",
+                    vk::to_string(buffer_result.result));
+        return false;
+    }
+    const vk::Buffer zero_buffer = buffer_result.value;
+    const auto reqs = device.getBufferMemoryRequirements(zero_buffer);
+    if (!(reqs.memoryTypeBits & (1u << arena_memory_type_index)) || reqs.size > shared_zero_size) {
+        LOG_WARNING(Render, "Shared block of zeros: the arenas' memory type can't be cleared");
+        device.destroyBuffer(zero_buffer);
+        return false;
+    }
+    const vk::MemoryAllocateInfo alloc_info = {
+        .allocationSize = shared_zero_size,
+        .memoryTypeIndex = arena_memory_type_index,
+    };
+    auto memory_result = device.allocateMemory(alloc_info);
+    if (memory_result.result != vk::Result::eSuccess) {
+        LOG_WARNING(Render, "Shared block of zeros: allocating {} MB failed ({})",
+                    shared_zero_size >> 20, vk::to_string(memory_result.result));
+        device.destroyBuffer(zero_buffer);
+        return false;
+    }
+    if (device.bindBufferMemory(zero_buffer, memory_result.value, 0) != vk::Result::eSuccess) {
+        LOG_WARNING(Render, "Shared block of zeros: binding its memory failed");
+        device.destroyBuffer(zero_buffer);
+        device.freeMemory(memory_result.value);
+        return false;
+    }
+    scheduler.EndRendering();
+    const auto cmdbuf = scheduler.CommandBuffer();
+    cmdbuf.fillBuffer(zero_buffer, 0, shared_zero_size, 0);
+    const vk::MemoryBarrier2 barrier = {
+        .srcStageMask = vk::PipelineStageFlagBits2::eAllTransfer,
+        .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+        .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+        .dstAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
+    };
+    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+        .memoryBarrierCount = 1,
+        .pMemoryBarriers = &barrier,
+    });
+    // Cleared before any arena exists, so before any bind to it.
+    scheduler.Finish();
+    device.destroyBuffer(zero_buffer);
+    shared_zero_memory = memory_result.value;
+    return true;
+}
+
+void BufferCache::BindSharedZeros(const Buffer* arena, const IntervalList<>& blocks) {
+    ArenaBinds* binds = BindsForArena(arena);
+    const u64 chunk_blocks = shared_zero_size >> block_shift;
+    u64 count = 0;
+    for (const auto& range : blocks) {
+        for (u64 block = range.start; block < range.end; block += chunk_blocks) {
+            const u64 n = std::min(chunk_blocks, range.end - block);
+            binds->binds.push_back(vk::SparseMemoryBind{
+                .resourceOffset = (block << block_shift) - arena->cpu_addr,
+                .size = n << block_shift,
+                .memory = shared_zero_memory,
+                .memoryOffset = 0,
+            });
+            count += n;
+        }
+    }
+    // Ordered after the work before it like the binds that wake blocks (build 51): none of
+    // that work should read these blocks, but changing a binding under work that does is the
+    // very thing this is meant to rule out.
+    pending_binds_wake_lazy = true;
+    pending_binds_zero = true;
+    VideoCore::VramMonitor::shared_zero_bound_blocks.fetch_add(count, std::memory_order_relaxed);
+}
+
 void BufferCache::EnsureResidentLazy(const Buffer* arena, u64 first_block, u64 last_block) {
     // A large range read from, like the texel buffers inFAMOUS Second Son binds over 3 GB of its
     // memory, is made resident only where something is uploaded to it that is not all zeros (see
@@ -1515,6 +1570,9 @@ void BufferCache::EnsureResidentLazy(const Buffer* arena, u64 first_block, u64 l
     }
     if (!waiting.Empty()) {
         PublishLazyZero();
+        if (lazy_zero_shared) {
+            BindSharedZeros(arena, waiting);
+        }
     }
     lazy_cover_hints[next_lazy_hint] = {first_block, end, lazy_zero_generation};
     next_lazy_hint = (next_lazy_hint + 1) % lazy_cover_hints.size();
@@ -1936,6 +1994,7 @@ void BufferCache::PrepareArenaBinds() {
 void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
     if (pending_binds.empty()) {
         pending_binds_wake_lazy = false;
+        pending_binds_zero = false;
         bind_wait_tick = 0;
         return;
     }
@@ -2014,8 +2073,10 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
     for (const auto& binds : pending_binds) {
         binds_in_this += binds.binds.size();
     }
-    Vulkan::GpuHang::NoteQueueOp(Vulkan::GpuHang::QueueOp::SparseBind, binds_in_this,
-                                 signal_tick);
+    Vulkan::GpuHang::NoteQueueOp(pending_binds_zero ? Vulkan::GpuHang::QueueOp::SparseBindZeros
+                                                    : Vulkan::GpuHang::QueueOp::SparseBind,
+                                 binds_in_this, signal_tick);
+    pending_binds_zero = false;
     auto submit_result = instance.GetGraphicsQueue().bindSparse(sparse_info);
     Vulkan::GpuHang::Check(submit_result, "a sparse bind (empty buffer memory left out)");
     ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");

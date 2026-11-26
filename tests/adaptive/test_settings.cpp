@@ -130,15 +130,23 @@ TEST(Settings, EmptyMemoryOutOnByDefaultAndOldKeyIgnored) {
     EXPECT_FALSE(ParseSettings(SerializeSettings(off)).lazy_zero_memory);
 }
 
-TEST(Settings, Build51ExperimentsOffByDefaultAndRoundTrip) {
+TEST(Settings, Build51ExperimentKeysIgnored) {
+    // Removed in build 52: a settings file that still has them parses without warnings.
+    const auto s = ParseSettings("early_copy_back = 1\nkeep_rewritten_pages = 1\n");
+    EXPECT_TRUE(s.warnings.empty());
+    EXPECT_EQ(SerializeSettings(s).find("early_copy_back"), std::string::npos);
+}
+
+TEST(Settings, CheatsKeptOnRoundTrip) {
     const auto d = ParseSettings("");
-    EXPECT_FALSE(d.early_copy_back);
-    EXPECT_FALSE(d.keep_rewritten_pages);
-    UserSettings on;
-    on.early_copy_back = true;
-    on.keep_rewritten_pages = true;
-    const auto back = ParseSettings(SerializeSettings(on));
-    EXPECT_TRUE(back.early_copy_back);
-    EXPECT_TRUE(back.keep_rewritten_pages);
+    EXPECT_EQ(d.cheats_kept_on, 0u);
+    EXPECT_FLOAT_EQ(d.smoke_dash_kept, 1.0f);
+    UserSettings s;
+    s.cheats_kept_on = 0b100101;
+    s.smoke_dash_kept = 2.5f;
+    const auto back = ParseSettings(SerializeSettings(s));
+    EXPECT_EQ(back.cheats_kept_on, 0b100101u);
+    EXPECT_FLOAT_EQ(back.smoke_dash_kept, 2.5f);
     EXPECT_TRUE(back.warnings.empty());
+    EXPECT_FALSE(ParseSettings("cheat_smoke_dash = 9\n").warnings.empty());
 }

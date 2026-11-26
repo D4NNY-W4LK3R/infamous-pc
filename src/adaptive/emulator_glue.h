@@ -57,6 +57,14 @@ void ReportVulkanDevice(const std::string& name, std::uint32_t vendor_id, std::u
 void SetVramSampler(std::function<std::uint64_t()> used, std::function<std::uint64_t()> budget);
 /// Mains power or battery, for the report: a laptop on battery slows down (build 51).
 void SetPowerNote(const std::string& note);
+/// Cheats (build 52): the "Cheats:" line of the session report.
+void SetCheatsNote(const std::string& note);
+/// Cheats kept on from launch to launch: bit i = Adaptive::CheatKeys[i]; the Smoke dash length
+/// kept (1 = off). Saving them takes effect at the next launch's start.
+std::uint32_t CheatsKeptOn();
+float SmokeDashKept();
+void SetCheatKeptOn(unsigned index, bool on);
+void SetSmokeDashKept(float scale);
 
 /// Common::Perf::OnFlip: one call per presented frame.
 inline void OnFrame(double frame_ms, const double* stall_ms, std::uint32_t num_stalls,
@@ -93,11 +101,6 @@ void SetVramPriorities(bool on);
 /// Empty buffer memory left out of video memory (F3 > Graphics, next launch).
 bool LazyZeroMemory();
 void SetLazyZeroMemory(bool on);
-/// Build 51 experiments, next launch (F3 > Graphics).
-bool EarlyCopyBack();
-void SetEarlyCopyBack(bool on);
-bool KeepRewrittenPages();
-void SetKeepRewrittenPages(bool on);
 /// Saves them for the next launch.
 void SetGamePatches(const GamePatchSettings& patches);
 /// The performance mode this launch uses: the frame-rate target's choice, else the setting.

@@ -391,6 +391,8 @@ enum class EmuKey : u8 {
     MouseAimSlower,
     MouseAimFaster,
     SprayCanSideways, ///< P: the spray can held normally / sideways (stencil art) / other way
+    SprayFlipUpDown,    ///< N: the mouse's up / down reversed while painting (build 52)
+    SprayFlipLeftRight, ///< M: the mouse's left / right reversed while painting (build 52)
     Count,
 };
 /// The SDL keycode bound to an emulator key; 0 = none.

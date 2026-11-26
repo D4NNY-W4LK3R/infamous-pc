@@ -11,7 +11,9 @@
 
 #include "adaptive/emulator_glue.h"
 #include "adaptive/glue_internal.h"
+#include "adaptive/settings.h"
 #include "core/mouse_aim.h"
+#include "core/second_son_cheats.h"
 #include "imgui/imgui_layer.h"
 #include "imgui/notice_layer.h"
 
@@ -38,6 +40,75 @@ const char* ModeHelp(Mode m) {
     return "";
 }
 
+/// F1 > Cheats (build 52): each cheat switches at once; "keep on" has it on at every launch.
+void DrawCheats() {
+    namespace Cheats = Core::SecondSonCheats;
+    if (!ImGui::CollapsingHeader("Cheats")) {
+        return;
+    }
+    if (Cheats::GetState(Cheats::Id::Energy) == Cheats::State::NotLoaded) {
+        ImGui::TextDisabled("Available once the game is running.");
+        return;
+    }
+    const std::uint32_t kept = Glue::CheatsKeptOn();
+    for (std::size_t i = 0; i < Cheats::NumCheats; ++i) {
+        const auto id = static_cast<Cheats::Id>(i);
+        const auto state = Cheats::GetState(id);
+        const bool available = state != Cheats::State::NotAvailable;
+        ImGui::PushID(static_cast<int>(i));
+        ImGui::BeginDisabled(!available);
+        if (id == Cheats::Id::SmokeDash) {
+            float scale = Cheats::SmokeScale();
+            ImGui::SetNextItemWidth(160.0f);
+            if (ImGui::SliderFloat(Cheats::Name(id), &scale, 1.0f, 5.0f, "%.1fx")) {
+                Cheats::SetSmokeScale(scale);
+            }
+            // Kept on, the length kept follows the slider once it is let go (at 1: not kept).
+            if (ImGui::IsItemDeactivatedAfterEdit() && Glue::SmokeDashKept() > 1.0f) {
+                Glue::SetSmokeDashKept(Cheats::SmokeScale());
+            }
+            ImGui::SameLine(330.0f);
+            bool keep = Glue::SmokeDashKept() > 1.0f;
+            if (ImGui::Checkbox("keep on", &keep)) {
+                if (keep && Cheats::SmokeScale() <= 1.0f) {
+                    Cheats::SetSmokeScale(3.0f);
+                }
+                Glue::SetSmokeDashKept(keep ? Cheats::SmokeScale() : 1.0f);
+            }
+        } else {
+            bool on = state == Cheats::State::On;
+            if (ImGui::Checkbox(Cheats::Name(id), &on)) {
+                const auto after = Cheats::Set(id, on);
+                if (!on) {
+                    // Off is off at the next launch too.
+                    Glue::SetCheatKeptOn(static_cast<unsigned>(i), false);
+                }
+                if (after == Cheats::State::NotAvailable) {
+                    Overlay::Notice::Show(std::string(Cheats::Name(id)) +
+                                          ": not available for this version");
+                }
+            }
+            ImGui::SameLine(330.0f);
+            bool keep = (kept >> i) & 1u;
+            if (ImGui::Checkbox("keep on", &keep)) {
+                Glue::SetCheatKeptOn(static_cast<unsigned>(i), keep);
+                if (keep) {
+                    Cheats::Set(id, true);
+                }
+            }
+        }
+        ImGui::EndDisabled();
+        if (!available) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("not available for this version");
+        } else if (const char* note = Cheats::Note(id)) {
+            ImGui::TextDisabled("  %s", note);
+        }
+        ImGui::PopID();
+    }
+    ImGui::TextDisabled("Without \"keep on\" every cheat starts off at each launch.");
+}
+
 class AdaptiveLayer final : public ImGui::Layer {
 public:
     void Draw() override {
@@ -54,6 +125,7 @@ public:
             g_visible.store(false, std::memory_order_relaxed);
         }
         ImGui::TextUnformatted(("Mouse camera: " + Core::MouseAim::StatusText()).c_str());
+        DrawCheats();
         CentralBrain* brain = BrainForOverlay();
         if (!brain) {
             ImGui::TextWrapped("The optimizer is turned off (enabled=0 in user/adaptive/"

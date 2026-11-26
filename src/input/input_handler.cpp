@@ -263,6 +263,8 @@ constexpr std::array<EmuKeyName, static_cast<size_t>(EmuKey::Count)> emu_key_nam
     {"hotkey_mouse_aim_slower", SDLK_MINUS},
     {"hotkey_mouse_aim_faster", SDLK_EQUALS},
     {"hotkey_spray_can_sideways", SDLK_P},
+    {"hotkey_spray_flip_up_down", SDLK_N},
+    {"hotkey_spray_flip_left_right", SDLK_M},
 }};
 constexpr u32 EmuKeyNone = ~0u; // "none" in the config; 0 = the default key
 std::array<std::atomic<u32>, static_cast<size_t>(EmuKey::Count)> emu_keys{};

@@ -469,6 +469,11 @@ public:
         return features.shaderStorageImageMultisample;
     }
 
+    /// Returns whether sparse memory may be bound to several places at once (enabled if so).
+    bool IsSparseResidencyAliasedSupported() const {
+        return features.sparseResidencyAliased;
+    }
+
     /// Returns whether the device can report memory usage.
     bool CanReportMemoryUsage() const {
         return supports_memory_budget;

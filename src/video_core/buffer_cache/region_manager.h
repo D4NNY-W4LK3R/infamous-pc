@@ -297,30 +297,6 @@ private:
                                   u64 mask) {
         if constexpr (cpu_op != StateOp::None) {
             const u64 prev = cpu.Load(index);
-            if constexpr (cpu_op == StateOp::Clear) {
-                if (hot) {
-                    // Uploaded for a read: pages written again every frame stay marked and
-                    // unprotected, so they are uploaded at every use and the game doesn't fault
-                    // on them (build 51 experiment). Uploaded for a GPU write, they are
-                    // protected again, as the GPU's copy then holds what counts.
-                    DecayHot();
-                    const u64 kept = hot->bits.Load(index) & mask;
-                    if (kept != 0) {
-                        if constexpr (gpu_op == StateOp::Set) {
-                            hot->bits.Store(index, hot->bits.Load(index) & ~kept);
-                            const s64 n = std::popcount(kept);
-                            hot->count -= n;
-                            VideoCore::VramMonitor::rewritten_pages_kept.fetch_sub(
-                                n, std::memory_order_relaxed);
-                        } else {
-                            VideoCore::VramMonitor::rewritten_upload_bytes.fetch_add(
-                                static_cast<u64>(std::popcount(kept & prev)) * BYTES_PER_PAGE,
-                                std::memory_order_relaxed);
-                            mask &= ~kept;
-                        }
-                    }
-                }
-            }
             const u64 next = (cpu_op == StateOp::Clear) ? (prev & ~mask) : (prev | mask);
             cpu.Store(index, next);
             SetWordBit(cpu_words, index, next != 0);
@@ -329,7 +305,6 @@ private:
                 if (write_prot[index] != 0) {
                     cpu_modified_generation.fetch_add(1, std::memory_order_release);
                     MarkRewritten(index, write_prot[index]);
-                    NoteHot(index, write_prot[index]);
                 }
             }
         }
@@ -424,76 +399,6 @@ private:
         }
     }
 
-    /// Pages written again every frame (build 51 experiment): a page newly marked modified from
-    /// the CPU in the frame after the one it was last marked in, three times running, stays
-    /// marked and unprotected. Every 128 frames they are all protected again on their next upload,
-    /// so pages the game stopped writing go back to faulting.
-    struct HotPages {
-        std::array<u16, NUM_REGION_WORDS * PAGES_PER_WORD> frame{};
-        std::array<u8, NUM_REGION_WORDS * PAGES_PER_WORD> streak{};
-        RegionBits bits{};
-        s64 count{};
-        u64 epoch{};
-    };
-    static constexpr u8 HotStreak = 3;
-    static constexpr s64 MaxHotPages = 32768; // 128 MB over all memory
-    static constexpr u64 HotEpochFrames = 128;
-
-    /// With the lock held.
-    void NoteHot(u64 index, u64 pages) {
-        if (!VideoCore::VramMonitor::keep_rewritten_pages.load(std::memory_order_relaxed)) {
-            return;
-        }
-        if (!hot) {
-            hot = std::make_unique<HotPages>();
-            hot->epoch = Common::Perf::FrameNumber() / HotEpochFrames;
-        }
-        DecayHot();
-        const u64 now = Common::Perf::FrameNumber();
-        const u16 frame16 = static_cast<u16>(now);
-        const u64 gpu_word = gpu.Load(index);
-        u64 newly_hot = 0;
-        for (u64 bits = pages; bits != 0; bits &= bits - 1) {
-            const u64 bit = std::countr_zero(bits);
-            const u64 page = index * PAGES_PER_WORD + bit;
-            const u16 delta = static_cast<u16>(frame16 - hot->frame[page]);
-            hot->streak[page] =
-                delta <= 1 ? static_cast<u8>(std::min<u32>(hot->streak[page] + 1, 255)) : u8{1};
-            hot->frame[page] = frame16;
-            if (hot->streak[page] >= HotStreak && !(gpu_word & (1ULL << bit))) {
-                newly_hot |= 1ULL << bit;
-            }
-        }
-        newly_hot &= ~hot->bits.Load(index);
-        if (newly_hot == 0) {
-            return;
-        }
-        const s64 n = std::popcount(newly_hot);
-        if (VideoCore::VramMonitor::rewritten_pages_kept.load(std::memory_order_relaxed) + n >
-            MaxHotPages) {
-            return;
-        }
-        hot->bits.Store(index, hot->bits.Load(index) | newly_hot);
-        hot->count += n;
-        VideoCore::VramMonitor::rewritten_pages_kept.fetch_add(n, std::memory_order_relaxed);
-    }
-
-    /// With the lock held.
-    void DecayHot() {
-        const u64 epoch = Common::Perf::FrameNumber() / HotEpochFrames;
-        if (hot->epoch == epoch) {
-            return;
-        }
-        hot->epoch = epoch;
-        if (hot->count != 0) {
-            VideoCore::VramMonitor::rewritten_pages_kept.fetch_sub(hot->count,
-                                                                   std::memory_order_relaxed);
-            hot->count = 0;
-            hot->bits.Fill(0);
-        }
-    }
-
-    std::unique_ptr<HotPages> hot;
     PageManager* tracker;
     VAddr cpu_addr{};
     u32 readbacks_mode;

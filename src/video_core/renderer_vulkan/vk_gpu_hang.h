@@ -35,6 +35,8 @@ enum class QueueOp : u8 {
     ComputeSubmit,
     SparseBind,
     Present,
+    /// A sparse bind that also binds blocks to the shared block of zeros (build 52).
+    SparseBindZeros,
 };
 
 /// Called once the device exists, with its queues (null ones are skipped) and whether the
@@ -52,6 +54,10 @@ const void* Mark(Work work, bool compute_queue, u64 hash, u64 hash2, u64 count, 
 
 /// Keeps the last queue operations: what was submitted or bound just before the card stopped.
 void NoteQueueOp(QueueOp op, u64 value, u64 extra = 0) noexcept;
+
+/// Keeps the last shader and pipeline compiles (build 52): the build 51 device lost came right
+/// after the game compiled a few new shaders. kind: "shader", "graphics pipeline", ...
+void NoteCompile(const char* kind, u64 hash) noexcept;
 
 /// Writes the record the first time a call returns VK_ERROR_DEVICE_LOST; the later calls only
 /// return. where: what returned it.

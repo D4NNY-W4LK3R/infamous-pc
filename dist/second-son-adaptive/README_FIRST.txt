@@ -31,6 +31,9 @@ CONTROLS (keyboard and mouse)
                        other way (if up/down is reversed), P again = normal (graffiti).
                        Since build 38 it goes back to normal by itself 2 s after the gameplay
                        camera is back, so the next graffiti never starts sideways.
+  N / M                build 52, while painting: N flips the mouse's up / down, M its left /
+                       right, for a stencil that still paints the wrong way (the Seattle
+                       painter stencil: N). They go back to normal with P's reset.
                        Where you aim up or down stays put for 5 s after you last moved
                        the mouse, also on ledges and rooftop edges where the game pulls
                        the camera back to level (SHADPS4_MOUSE_AIM_TILT_HOLD=0: off).
@@ -132,6 +135,14 @@ FRAME RATE AND SETTINGS (F3)
   user\adaptive\settings.ini (frame_limit). Keep Present Mode on Mailbox: vsync (Fifo) at 60 Hz
   makes ~30 fps frames alternate between one and two refreshes.
 
+CHEATS (F1 > Cheats, build 52)
+  Infinite energy, bombs / rockets, skill points / shards and finisher (GoldHEN cheat database,
+  CUSA00004 01.07: Weysincha, 2B), infinite Neon and Video dash and a longer Smoke dash (adapted
+  from Liondarkz/issn_pc). Each switches on and off at once; "keep on" has it on at every
+  launch, otherwise every cheat starts off. The game's code is compared byte for byte first:
+  where it differs the cheat shows "not available for this version". Skill points change your
+  save once the game saves. The report gets a "Cheats:" line so frame rates are read with it.
+
 SECOND SON GAME PATCHES (F3 > Graphics, apply at the next launch; game update 01.07 only)
   Ported from the shadPS4-second-son v1.1.1 fork. Each checks the game's code byte for byte
   first and is skipped if anything differs; F1 > "Second Son game patches" shows what is on.
@@ -220,7 +231,10 @@ TROUBLESHOOTING
   Experimental, build 44: F3 > Graphics > "Leave Empty Buffer Memory Out of Video Memory" (next
   launch). Of the 3 GB the game reads through two buffers, about 1.4 GB holds only zeros; with
   this on, those parts are not put in video memory until data lands there. The "VRAM:" lines
-  show how much was left out. Build 38 also samples the game's main thread while the
+  show how much was left out. Since build 52 the parts left out are bound to one shared 2 MB
+  block of zeros instead of to nothing (crash hunt; SS_LAZY_ZERO_SHARED=0 = the build 51 way),
+  and a device lost writes the video memory budget overshoot and the shader compiles of the
+  last 10 s to gpu_hang_record.txt. Build 38 also samples the game's main thread while the
   spray can is out (stencil probe, SS_STENCIL_PROBE=0: off), to find how to tell stencil art
   from other graffiti without P.
   Back to the plain 4 GB behaviour for one run: set SS_ADAPTIVE=0 and SHADPS4_MOUSE_AIM=0

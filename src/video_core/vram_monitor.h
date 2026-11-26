@@ -35,11 +35,18 @@ extern std::atomic<u64> lazy_zero_bytes;
 /// could not (build 51).
 extern std::atomic<u64> lazy_wake_binds;
 extern std::atomic<u64> lazy_wake_unordered;
-/// Pages written again every frame kept unprotected (build 51 experiment): whether it is on,
-/// how many pages are kept, and the bytes uploaded for them because they were.
-extern std::atomic<bool> keep_rewritten_pages;
-extern std::atomic<s64> rewritten_pages_kept;
-extern std::atomic<u64> rewritten_upload_bytes;
+/// Build 52: whether blocks left out are bound to the shared block of zeros, how many blocks
+/// were bound to it, and GPU writes found on it (woken first; should stay 0).
+extern std::atomic<bool> shared_zero_on;
+extern std::atomic<u64> shared_zero_bound_blocks;
+extern std::atomic<u64> shared_zero_guard_wakes;
+/// Build 52: video memory in use and its budget at the monitor's last look (every 2 s), the
+/// seconds since launch of that look, and the highest use in about the last minute; read by
+/// the GPU hang record.
+extern std::atomic<u64> last_used_bytes;
+extern std::atomic<u64> last_budget_bytes;
+extern std::atomic<double> last_sample_seconds;
+extern std::atomic<u64> recent_peak_used_bytes;
 
 /// Starts the monitor's thread (once), and stops it before the instance goes.
 void Start(const Vulkan::Instance& instance);

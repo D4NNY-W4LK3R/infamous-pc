@@ -419,6 +419,21 @@ void WindowSDL::WaitEvent() {
                 : hold == Input::SprayHold::Sideways ? "Spray can: sideways (stencil art) - P again if up/down is reversed"
                                                      : "Spray can: sideways, the other way - P again for normal");
         }
+        if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
+            Input::MouseTurnsMotionSensor() &&
+            (emu_key(Input::EmuKey::SprayFlipUpDown) ||
+             emu_key(Input::EmuKey::SprayFlipLeftRight))) {
+            // N / M (build 52): flip the mouse's up / down or left / right while painting, for
+            // stencils that paint the wrong way. Only while the mouse turns the spray can, so
+            // the keys do nothing in gameplay; they reset once back in gameplay.
+            const bool up_down = emu_key(Input::EmuKey::SprayFlipUpDown);
+            const bool on = up_down ? Input::ToggleSprayFlipUpDown()
+                                    : Input::ToggleSprayFlipLeftRight();
+            const char* what = up_down ? "up / down" : "left / right";
+            LOG_INFO(Input, "Spray flip: {} {}", what, on ? "reversed" : "normal");
+            Overlay::Notice::Show(fmt::format("Spray can: mouse {} {} (until the can is put away)",
+                                              what, on ? "reversed" : "normal again"));
+        }
         OnKeyboardMouseInput(&event);
         break;
     case SDL_EVENT_GAMEPAD_ADDED:

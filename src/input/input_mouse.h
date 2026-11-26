@@ -73,6 +73,11 @@ bool TouchGripActive();
 enum class SprayHold : u8 { Normal, Sideways, SidewaysOtherWay };
 SprayHold CycleSprayHold();
 SprayHold CurrentSprayHold();
+/// Build 52 stopgap for stencils that paint the wrong way (the Seattle painter one: up and down
+/// reversed): N flips the mouse's up / down while painting, M its left / right. Both hold until
+/// the spray can is put away (back in gameplay), like P. They return the new state.
+bool ToggleSprayFlipUpDown();
+bool ToggleSprayFlipLeftRight();
 /// The mouse turns the emulated motion sensor (Second Son with the camera hook idle: the spray
 /// can, menus, cut-scenes), and how long ago it last moved there.
 bool MouseTurnsMotionSensor();

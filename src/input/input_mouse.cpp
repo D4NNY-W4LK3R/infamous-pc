@@ -80,6 +80,18 @@ void SetMouseGyroRollMode(bool mode) {
 
 namespace {
 std::atomic<SprayHold> g_spray_hold{SprayHold::Normal};
+std::atomic<bool> g_flip_up_down{false};
+std::atomic<bool> g_flip_left_right{false};
+
+/// The mouse movement the motion sensor gets, with the flip keys applied (build 52).
+void ApplySprayFlips(float& d_x, float& d_y) {
+    if (g_flip_left_right.load(std::memory_order_relaxed)) {
+        d_x = -d_x;
+    }
+    if (g_flip_up_down.load(std::memory_order_relaxed)) {
+        d_y = -d_y;
+    }
+}
 std::atomic<bool> g_motion_from_mouse_seen{false};
 std::atomic<s64> g_last_mouse_motion_ms{0};
 /// Since when the gameplay camera has been running the hook, for putting the spray can back
@@ -104,6 +116,18 @@ bool MouseTurnsMotionSensor() {
 u64 MsSinceMouseMotion() {
     const s64 last = g_last_mouse_motion_ms.load(std::memory_order_relaxed);
     return last == 0 ? ~u64{0} : static_cast<u64>(std::max<s64>(NowMs() - last, 0));
+}
+
+bool ToggleSprayFlipUpDown() {
+    const bool on = !g_flip_up_down.load();
+    g_flip_up_down.store(on);
+    return on;
+}
+
+bool ToggleSprayFlipLeftRight() {
+    const bool on = !g_flip_left_right.load();
+    g_flip_left_right.store(on);
+    return on;
 }
 
 SprayHold CycleSprayHold() {
@@ -152,10 +176,16 @@ void EmulateJoystick(GameController* controller, u32 interval) {
             const s64 now = NowMs();
             if (g_camera_live_since_ms == 0) {
                 g_camera_live_since_ms = now;
-            } else if (now - g_camera_live_since_ms >= 2000 &&
-                       g_spray_hold.load(std::memory_order_relaxed) != SprayHold::Normal) {
-                g_spray_hold.store(SprayHold::Normal);
-                LOG_INFO(Input, "Spray can held upright again (back in gameplay)");
+            } else if (now - g_camera_live_since_ms >= 2000) {
+                if (g_spray_hold.load(std::memory_order_relaxed) != SprayHold::Normal) {
+                    g_spray_hold.store(SprayHold::Normal);
+                    LOG_INFO(Input, "Spray can held upright again (back in gameplay)");
+                }
+                // The flip keys (build 52) reset the same way: stencils can't be told apart
+                // yet, so a flip can't be remembered per stencil.
+                if (g_flip_up_down.exchange(false) | g_flip_left_right.exchange(false)) {
+                    LOG_INFO(Input, "Spray flip: reset (back in gameplay)");
+                }
             }
             g_motion_from_mouse_seen.store(false, std::memory_order_relaxed);
             if (motion_from_mouse) {
@@ -169,7 +199,10 @@ void EmulateJoystick(GameController* controller, u32 interval) {
         }
         g_camera_live_since_ms = 0;
         float gyro_from_mouse[3];
-        MouseToRotation(g_spray_hold.load(std::memory_order_relaxed), d_x, d_y, gyro_from_mouse);
+        float m_x = d_x;
+        float m_y = d_y;
+        ApplySprayFlips(m_x, m_y);
+        MouseToRotation(g_spray_hold.load(std::memory_order_relaxed), m_x, m_y, gyro_from_mouse);
         controller->SetEmulatedRotationRate(gyro_from_mouse);
         motion_from_mouse = true;
         g_motion_from_mouse_seen.store(true, std::memory_order_relaxed);
@@ -216,6 +249,7 @@ void EmulateGyro(GameController* controller, u32 interval) {
     float d_x = 0, d_y = 0;
     SDL_GetRelativeMouseState(&d_x, &d_y);
     float gyro_from_mouse[3];
+    ApplySprayFlips(d_x, d_y);
     MouseToRotation(g_spray_hold.load(std::memory_order_relaxed), d_x, d_y, gyro_from_mouse);
     if (mouse_gyro_roll_mode) {
         gyro_from_mouse[1] = 0.0f;

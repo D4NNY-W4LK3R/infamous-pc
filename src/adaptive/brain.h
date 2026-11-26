@@ -202,6 +202,8 @@ public:
     void SetRendererGpu(const GpuInfo& gpu);
     /// What the report says about mains power and battery this launch (build 51).
     void SetPowerNote(std::string note);
+    /// The "Cheats:" line (build 52): what was on this launch, so numbers are read with it.
+    void SetCheatsNote(std::string note);
 
     StartupResult Startup(const HardwareInfo& hw, const SoftwareInfo& sw, const EnvGet& env_get,
                           const EnvSet& env_set);
@@ -377,6 +379,7 @@ private:
 
     // Cross-thread.
     std::string power_note; ///< guarded by renderer_gpu_mutex
+    std::string cheats_note; ///< guarded by renderer_gpu_mutex
     mutable std::mutex renderer_gpu_mutex;
     std::optional<GpuInfo> renderer_gpu;
     mutable std::mutex status_mutex;
