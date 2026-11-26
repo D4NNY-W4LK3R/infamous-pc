@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdlib>
 #include <deque>
 #include <mutex>
 #include <string>
@@ -89,6 +90,16 @@ struct Totals {
     double page_changed{};
     double window_changed{};
 };
+
+/// Copying the copied-back memory to compare it later is off by default since build 51 (it
+/// answered its question: skipping copies back is not safe); SS_COPY_BACK_SAMPLES=1 turns it on.
+bool SamplingOn() {
+    static const bool on = [] {
+        const char* env = std::getenv("SS_COPY_BACK_SAMPLES");
+        return env && env[0] == '1';
+    }();
+    return on;
+}
 
 struct Sample {
     u64 start{};
@@ -289,8 +300,9 @@ void NoteCopyBack(Core::MemoryManager* memory, u64 address, u64 size, u64 window
             }
         }
         // Only copies back for a write can have been unneeded: the game read the others.
-        if (is_write && !gpu_thread && memory && samples.size() < MaxPendingSamples &&
-            now - last_sample >= SampleEvery && window_end - window_start <= MaxSampleBytes) {
+        if (SamplingOn() && is_write && !gpu_thread && memory &&
+            samples.size() < MaxPendingSamples && now - last_sample >= SampleEvery &&
+            window_end - window_start <= MaxSampleBytes) {
             last_sample = now;
             take_sample = true;
         }

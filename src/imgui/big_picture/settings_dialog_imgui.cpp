@@ -79,6 +79,8 @@ void SettingsWindow::LoadSettings(std::string profile) {
         particleLightsSetting = patches.particle_light_one_submit;
         vramPrioritiesSetting = Adaptive::Glue::VramPriorities();
         lazyZeroSetting = Adaptive::Glue::LazyZeroMemory();
+        earlyCopyBackSetting = Adaptive::Glue::EarlyCopyBack();
+        keepRewrittenSetting = Adaptive::Glue::KeepRewrittenPages();
         const auto target = Adaptive::Glue::GetFpsTarget();
         const auto it = std::find(fpsTargetValues.begin(), fpsTargetValues.end(), target.fps);
         fpsTargetSetting =
@@ -168,6 +170,8 @@ void SettingsWindow::SaveSettings(std::string profile) {
             Adaptive::Glue::SetGamePatches(now);
         }
         Adaptive::Glue::SetLazyZeroMemory(lazyZeroSetting);
+        Adaptive::Glue::SetEarlyCopyBack(earlyCopyBackSetting);
+        Adaptive::Glue::SetKeepRewrittenPages(keepRewrittenSetting);
         const auto target_before = Adaptive::Glue::GetFpsTarget();
         const Adaptive::Glue::FpsTarget target_now{fpsTargetValues.at(fpsTargetSetting),
                                                    static_cast<u32>(lowestQualitySetting),
@@ -812,9 +816,13 @@ void SettingsWindow::DrawSettingsTable(SettingsCategory category) {
                                    "next launch)",
                                    particleLightsSetting);
             }
-            AddSettingCheckbox("Leave Empty Buffer Memory Out of Video Memory (Experimental, "
-                               "Next Launch)",
+            AddSettingCheckbox("Leave Empty Buffer Memory Out of Video Memory (Next Launch)",
                                lazyZeroSetting);
+            AddSettingCheckbox("Experiment: Copy Back Right After the GPU Writes (Next Launch)",
+                               earlyCopyBackSetting);
+            AddSettingCheckbox("Experiment: Keep Pages Written Every Frame Unprotected (Next "
+                               "Launch)",
+                               keepRewrittenSetting);
             AddSettingSliderInt("Window Width", windowWidthSetting, 0, 8000);
             AddSettingSliderInt("Window Height", windowHeightSetting, 0, 7000);
             AddSettingCheckbox("Enable HDR", hdrAllowedSetting);

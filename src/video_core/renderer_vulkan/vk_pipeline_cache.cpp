@@ -533,6 +533,9 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     ASSERT_MSG(cache_result == vk::Result::eSuccess, "Failed to create pipeline cache: {}",
                vk::to_string(cache_result));
     pipeline_cache = std::move(cache);
+    if (!driver_blob.empty()) {
+        driver_compiles_saved = PipelineTiming::DriverCompiles();
+    }
     LOG_INFO(Render_Vulkan,
              "Startup: driver cache file ({} MB) read in {:.0f} ms, handed to the driver in "
              "{:.0f} ms",
@@ -556,10 +559,12 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         std::filesystem::remove(retried, ec);
     }
     const auto save_start = TimingClock::now();
-    SaveDriverCache();
-    LOG_INFO(Render_Vulkan, "Startup: driver cache saved after the preload in {:.0f} ms; shaders "
-                            "ready {:.1f} s after launch",
-             ms_since(save_start), PipelineTiming::SecondsSinceLaunch());
+    const bool saved = SaveDriverCache();
+    LOG_INFO(Render_Vulkan,
+             "Startup: driver cache {} after the preload in {:.0f} ms; shaders "
+             "ready {:.1f} s after launch",
+             saved ? "saved" : "not saved (nothing new in it)", ms_since(save_start),
+             PipelineTiming::SecondsSinceLaunch());
     StartDriverCacheSaver();
 }
 
@@ -571,6 +576,12 @@ PipelineCache::~PipelineCache() {
 
 bool PipelineCache::SaveDriverCacheUnchecked() {
     if (!pipeline_cache) {
+        return false;
+    }
+    // Getting, hashing and writing the 188 MB cache took 4-6 s, also when the driver compiled
+    // nothing since it was loaded or saved (build 50).
+    const u64 compiles = PipelineTiming::DriverCompiles();
+    if (compiles == driver_compiles_saved) {
         return false;
     }
     const auto get_start = std::chrono::steady_clock::now();
@@ -597,6 +608,7 @@ bool PipelineCache::SaveDriverCacheUnchecked() {
     const u64 h = std::hash<std::string_view>{}(
         std::string_view{reinterpret_cast<const char*>(blob.data()), blob.size()});
     if (driver_saver && driver_saver->last_hash == h) {
+        driver_compiles_saved = compiles;
         return false;
     }
     using namespace Common::FS;
@@ -619,6 +631,7 @@ bool PipelineCache::SaveDriverCacheUnchecked() {
     if (driver_saver) {
         driver_saver->last_hash = h;
     }
+    driver_compiles_saved = compiles;
     LOG_INFO(Render_Vulkan,
              "Saved driver VkPipelineCache ({} KB) to {} (getting it from the driver took {:.0f} "
              "ms, hashing and writing {:.0f} ms more)",

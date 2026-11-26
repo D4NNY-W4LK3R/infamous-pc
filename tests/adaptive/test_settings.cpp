@@ -117,3 +117,28 @@ TEST(Settings, VramPrioritiesOffByDefaultRoundTripAndEnvironment) {
     });
     EXPECT_TRUE(loaded.vram_priorities);
 }
+
+TEST(Settings, EmptyMemoryOutOnByDefaultAndOldKeyIgnored) {
+    EXPECT_TRUE(ParseSettings("").lazy_zero_memory);
+    // Build 44-50 wrote lazy_zero_memory while the switch was off by default: build 51 turns it
+    // on once.
+    const auto old = ParseSettings("lazy_zero_memory = 0\n");
+    EXPECT_TRUE(old.lazy_zero_memory);
+    EXPECT_TRUE(old.warnings.empty());
+    UserSettings off;
+    off.lazy_zero_memory = false;
+    EXPECT_FALSE(ParseSettings(SerializeSettings(off)).lazy_zero_memory);
+}
+
+TEST(Settings, Build51ExperimentsOffByDefaultAndRoundTrip) {
+    const auto d = ParseSettings("");
+    EXPECT_FALSE(d.early_copy_back);
+    EXPECT_FALSE(d.keep_rewritten_pages);
+    UserSettings on;
+    on.early_copy_back = true;
+    on.keep_rewritten_pages = true;
+    const auto back = ParseSettings(SerializeSettings(on));
+    EXPECT_TRUE(back.early_copy_back);
+    EXPECT_TRUE(back.keep_rewritten_pages);
+    EXPECT_TRUE(back.warnings.empty());
+}

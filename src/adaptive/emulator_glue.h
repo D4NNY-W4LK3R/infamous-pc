@@ -55,6 +55,8 @@ void ReportVulkanDevice(const std::string& name, std::uint32_t vendor_id, std::u
 /// Renderer: how to read VRAM use and budget (called from the brain thread about once a
 /// second). Both return 0 when unknown.
 void SetVramSampler(std::function<std::uint64_t()> used, std::function<std::uint64_t()> budget);
+/// Mains power or battery, for the report: a laptop on battery slows down (build 51).
+void SetPowerNote(const std::string& note);
 
 /// Common::Perf::OnFlip: one call per presented frame.
 inline void OnFrame(double frame_ms, const double* stall_ms, std::uint32_t num_stalls,
@@ -91,6 +93,11 @@ void SetVramPriorities(bool on);
 /// Empty buffer memory left out of video memory (F3 > Graphics, next launch).
 bool LazyZeroMemory();
 void SetLazyZeroMemory(bool on);
+/// Build 51 experiments, next launch (F3 > Graphics).
+bool EarlyCopyBack();
+void SetEarlyCopyBack(bool on);
+bool KeepRewrittenPages();
+void SetKeepRewrittenPages(bool on);
 /// Saves them for the next launch.
 void SetGamePatches(const GamePatchSettings& patches);
 /// The performance mode this launch uses: the frame-rate target's choice, else the setting.

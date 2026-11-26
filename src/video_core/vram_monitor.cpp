@@ -33,6 +33,11 @@ std::atomic<u64> image_bytes{0};
 std::atomic<u32> image_count{0};
 std::atomic<u32> raised_image_blocks{0};
 std::atomic<u64> lazy_zero_bytes{0};
+std::atomic<u64> lazy_wake_binds{0};
+std::atomic<u64> lazy_wake_unordered{0};
+std::atomic<bool> keep_rewritten_pages{false};
+std::atomic<s64> rewritten_pages_kept{0};
+std::atomic<u64> rewritten_upload_bytes{0};
 
 namespace {
 
@@ -171,6 +176,65 @@ private:
 
 std::jthread g_thread;
 
+/// Mains power and battery (build 51): a laptop switching to battery lowers its clocks, and that
+/// stretch reads like the emulator slowing down. A log line at each switch, and a report line.
+class PowerWatch {
+public:
+    void Poll() {
+#ifdef _WIN32
+        SYSTEM_POWER_STATUS status{};
+        if (!GetSystemPowerStatus(&status) || status.ACLineStatus > 1) {
+            return; // 255: unknown, a desktop without a battery says 1
+        }
+        const bool battery = status.ACLineStatus == 0;
+        const auto now = std::chrono::steady_clock::now();
+        const double minute = std::chrono::duration<double>(now - start).count() / 60.0;
+        const int percent = status.BatteryLifePercent <= 100 ? status.BatteryLifePercent : -1;
+        if (!known) {
+            known = true;
+            on_battery = battery;
+            since = now;
+            LOG_INFO(Render, "Power: {} at the start{}", battery ? "on battery" : "on mains power",
+                     percent >= 0 && status.BatteryFlag != 128
+                         ? fmt::format(" (battery {}%)", percent)
+                         : std::string{});
+        } else if (battery != on_battery) {
+            if (on_battery) {
+                battery_seconds += std::chrono::duration<double>(now - since).count();
+            }
+            on_battery = battery;
+            since = now;
+            ++switches;
+            LOG_INFO(Render,
+                     "Power: {} at minute {:.1f}{}; frame rates measured {} come from a laptop "
+                     "running {}",
+                     battery ? "switched to battery" : "back on mains power", minute,
+                     percent >= 0 ? fmt::format(" (battery {}%)", percent) : std::string{},
+                     battery ? "from now on" : "before this",
+                     battery ? "on battery, usually at lower clocks" : "on battery");
+        }
+        double on_battery_s = battery_seconds;
+        if (on_battery) {
+            on_battery_s += std::chrono::duration<double>(now - since).count();
+        }
+        if (switches > 0 || on_battery) {
+            Adaptive::Glue::SetPowerNote(fmt::format(
+                "on battery {:.1f} of {:.1f} minutes, {} switches between mains and battery; "
+                "seconds on battery are usually slower because the laptop lowers its clocks",
+                on_battery_s / 60.0, minute, switches));
+        }
+#endif
+    }
+
+private:
+    std::chrono::steady_clock::time_point start{std::chrono::steady_clock::now()};
+    std::chrono::steady_clock::time_point since{};
+    bool known{};
+    bool on_battery{};
+    int switches{};
+    double battery_seconds{};
+};
+
 void Run(std::stop_token stop, const Vulkan::Instance* instance) {
 #ifdef _WIN32
     WindowsCounters windows;
@@ -179,6 +243,7 @@ void Run(std::stop_token stop, const Vulkan::Instance* instance) {
         LOG_WARNING(Render, "VRAM monitor: the Windows GPU counters are not available");
     }
 #endif
+    PowerWatch power;
     std::map<std::string, std::pair<double, double>> engine_sum_max; // over the report
     u64 dedicated_max = 0;
     u64 shared_max = 0;
@@ -194,6 +259,7 @@ void Run(std::stop_token stop, const Vulkan::Instance* instance) {
         if (stop.stop_requested()) {
             return;
         }
+        power.Poll();
 #ifdef _WIN32
         if (have_windows) {
             const auto s = windows.Read();
@@ -240,12 +306,21 @@ void Run(std::stop_token stop, const Vulkan::Instance* instance) {
         }
         LOG_INFO(Render,
                  "VRAM: Vulkan video memory in use {} MB of a {} MB budget ({}); buffers made "
-                 "resident {} MB ({} MB left out as zeros), images {} MB in {}, {} memory "
-                 "blocks raised for images drawn to; {}",
+                 "resident {} MB ({} MB left out as zeros; {} binds of them waited for earlier "
+                 "work, {} could not), images {} MB in {}, {} memory blocks raised for images "
+                 "drawn to; {}",
                  used / MB, budget / MB, heaps, buffer_resident_bytes.load() / MB,
-                 lazy_zero_bytes.load() / MB,
+                 lazy_zero_bytes.load() / MB, lazy_wake_binds.load(), lazy_wake_unordered.load(),
                  image_bytes.load() / MB, image_count.load(), raised_image_blocks.load(),
                  windows_text);
+        if (keep_rewritten_pages.load(std::memory_order_relaxed)) {
+            LOG_INFO(Render,
+                     "Rewritten pages: {} pages ({} MB) kept unprotected, {} MB uploaded since "
+                     "the last line because they were (experiment)",
+                     std::max<s64>(rewritten_pages_kept.load(), 0),
+                     std::max<s64>(rewritten_pages_kept.load(), 0) * 4 / 1024,
+                     rewritten_upload_bytes.exchange(0) / MB);
+        }
         samples = 0;
         windows_samples = 0;
         engine_sum_max.clear();

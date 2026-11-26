@@ -200,6 +200,8 @@ public:
     /// Details only the renderer knows (heap sizes, Vulkan driver version, budget support), for
     /// the report. Does not change the fingerprint chosen at startup. Thread safe.
     void SetRendererGpu(const GpuInfo& gpu);
+    /// What the report says about mains power and battery this launch (build 51).
+    void SetPowerNote(std::string note);
 
     StartupResult Startup(const HardwareInfo& hw, const SoftwareInfo& sw, const EnvGet& env_get,
                           const EnvSet& env_set);
@@ -374,6 +376,7 @@ private:
     double tick_ms_total = 0.0;
 
     // Cross-thread.
+    std::string power_note; ///< guarded by renderer_gpu_mutex
     mutable std::mutex renderer_gpu_mutex;
     std::optional<GpuInfo> renderer_gpu;
     mutable std::mutex status_mutex;

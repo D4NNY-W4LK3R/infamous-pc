@@ -121,6 +121,9 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
         return {compute_queue.GetSemaphore().Handle(), tick > 0 ? tick - 1 : 0};
     });
 
+    // Binds that wake memory left out as zeros wait for the work sent before them (build 51).
+    scheduler.SetPreSubmitCallback(
+        [this](Vulkan::SubmitInfo&) { buffer_cache.PrepareArenaBinds(); });
     if (const auto async_queue = instance.GetAsyncQueue()) {
         async_scheduler =
             std::make_unique<Scheduler>(instance, scheduler.RecordsOnThread(), async_queue);
@@ -130,6 +133,7 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
         // queue so far, and may read what that wrote. Waiting for it also keeps what that work
         // uses alive as long as the graphics tick it was recorded in.
         scheduler.SetPreSubmitCallback([this](Vulkan::SubmitInfo& info) {
+            buffer_cache.PrepareArenaBinds();
             runtime.OnGraphicsSubmit(scheduler.CurrentTick());
             const u64 tick = runtime.FlushAsync();
             if (tick > async_tick_waited) {
@@ -325,6 +329,7 @@ void Rasterizer::EliminateFastClear() {
 }
 
 void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
+    buffer_cache.CopyBackWrittenHotWindows();
     RENDERER_TRACE;
 
     scheduler.PopPendingOperations();
@@ -416,6 +421,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
 void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u32 stride,
                               u32 max_count, VAddr count_address, u16 vertex_sgpr_offset,
                               u16 instance_sgpr_offset) {
+    buffer_cache.CopyBackWrittenHotWindows();
     RENDERER_TRACE;
 
     scheduler.PopPendingOperations();
@@ -777,6 +783,7 @@ std::vector<std::pair<vk::Semaphore, u64>> Rasterizer::ComputeSubmitWaits() {
 }
 
 void Rasterizer::DispatchDirect() {
+    buffer_cache.CopyBackWrittenHotWindows();
     RENDERER_TRACE;
 
     scheduler.PopPendingOperations();
@@ -912,6 +919,7 @@ void Rasterizer::DispatchOnAsync(const ComputePipeline& pipeline, u32 dim_x, u32
 }
 
 void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
+    buffer_cache.CopyBackWrittenHotWindows();
     RENDERER_TRACE;
 
     scheduler.PopPendingOperations();
@@ -989,6 +997,7 @@ void Rasterizer::OnSubmit() {
 
 void Rasterizer::OnFence() {
     texture_cache.ProcessDownloadImages();
+    buffer_cache.CopyBackWrittenHotWindows();
     buffer_cache.PrefetchReadbacks();
     if (async_scheduler && liverpool->IsComputeRingActive()) {
         // The game is told the compute ring's work is done, and reads what it wrote next.

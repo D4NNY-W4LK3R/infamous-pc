@@ -343,6 +343,12 @@ void Startup(const std::string& game_serial, const std::string& app_version,
     g_brain->Start();
 }
 
+void SetPowerNote(const std::string& note) {
+    if (g_brain) {
+        g_brain->SetPowerNote(note);
+    }
+}
+
 void ReportVulkanDevice(const std::string& name, std::uint32_t vendor_id, std::uint32_t device_id,
                         std::uint32_t driver_version, std::uint32_t api_version,
                         std::uint64_t device_local_bytes, std::uint64_t budget_bytes,
@@ -543,6 +549,54 @@ void SetVramPriorities(bool on) {
         g_settings.vram_priorities = on;
     }
     LOG_INFO(Render, "VRAM priorities {} from the next launch", on ? "on" : "off");
+}
+
+namespace {
+template <bool UserSettings::*Field>
+bool GetFlag() {
+    if (!g_dir.empty()) {
+        return g_settings.*Field;
+    }
+    const auto dir = Common::FS::GetUserPath(Common::FS::PathType::UserDir) / "adaptive";
+    return LoadSettings(dir / "settings.ini", EnvGet).*Field;
+}
+
+template <bool UserSettings::*Field>
+void SetFlag(bool on, const char* what) {
+    const auto dir =
+        g_dir.empty() ? Common::FS::GetUserPath(Common::FS::PathType::UserDir) / "adaptive" : g_dir;
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    UserSettings s = g_dir.empty() ? LoadSettings(dir / "settings.ini",
+                                                  [](const std::string&) { return std::nullopt; })
+                                   : g_settings;
+    if (s.*Field == on) {
+        return;
+    }
+    s.*Field = on;
+    SaveSettings(dir / "settings.ini", s);
+    if (!g_dir.empty()) {
+        g_settings.*Field = on;
+    }
+    LOG_INFO(Render, "{} {} from the next launch", what, on ? "on" : "off");
+}
+} // namespace
+
+bool EarlyCopyBack() {
+    return GetFlag<&UserSettings::early_copy_back>();
+}
+
+void SetEarlyCopyBack(bool on) {
+    SetFlag<&UserSettings::early_copy_back>(on, "Early copy back (experiment)");
+}
+
+bool KeepRewrittenPages() {
+    return GetFlag<&UserSettings::keep_rewritten_pages>();
+}
+
+void SetKeepRewrittenPages(bool on) {
+    SetFlag<&UserSettings::keep_rewritten_pages>(
+        on, "Pages written every frame kept unprotected (experiment)");
 }
 
 bool LazyZeroMemory() {

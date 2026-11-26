@@ -149,6 +149,11 @@ bool CentralBrain::RegisterMiniBrain(std::unique_ptr<MiniBrain> brain,
     return true;
 }
 
+void CentralBrain::SetPowerNote(std::string note) {
+    std::scoped_lock lk{renderer_gpu_mutex};
+    power_note = std::move(note);
+}
+
 void CentralBrain::SetRendererGpu(const GpuInfo& gpu) {
     std::scoped_lock lk{renderer_gpu_mutex};
     renderer_gpu = gpu;
@@ -1896,6 +1901,12 @@ std::string CentralBrain::BuildReport() const {
             shown.gpu.driver_version += " (Windows " + windows_driver + ")";
         }
         o << "== Hardware\n" << Describe(shown) << '\n';
+    }
+    {
+        std::scoped_lock lk{renderer_gpu_mutex};
+        if (!power_note.empty()) {
+            o << "== Power\n" << power_note << "\n\n";
+        }
     }
     o << "== Software\nemulator " << software.emulator_build << "\ngame " << software.game_serial
       << ' ' << software.game_version << " (eboot " << software.eboot_signature << ")\n\n";

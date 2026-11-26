@@ -182,7 +182,7 @@ TROUBLESHOOTING
   Build 50 measures only, and changes nothing in how the game runs:
   - GPU hang record: if the card stops responding ("device lost"), the log and
     log\gpu_hang_record.txt name the draws and dispatches it had started and not finished
-    (NVIDIA diagnostic checkpoints; SS_GPU_CHECKPOINTS=0 turns them off), the driver's fault
+    (NVIDIA diagnostic checkpoints; off since build 51, SS_GPU_CHECKPOINTS=1 turns them on), the driver's fault
     report where it has one, and the last submits, sparse binds and presents.
     COLLECT_DIAGNOSTICS also writes gpu_driver_events.txt (Windows resetting the display
     driver, NVIDIA driver errors).
@@ -191,6 +191,25 @@ TROUBLESHOOTING
   - "Copy-backs:" lines every 30 s and at the end: which memory the game waited to have
     copied back from the card, the game code that touched it, and for a sample of waits on a
     write how much of the copied memory the game then wrote over anyway.
+  Build 51:
+  - "Leave Empty Buffer Memory Out of Video Memory" is on by default (F3 > Graphics still
+    turns it off). The device lost after 32-44 min with it on is likely fixed: memory that
+    work already sent reads as zeros is now made resident only after that work is done (it
+    could read undefined memory before). The VRAM: lines count those binds.
+    SS_LAZY_ZERO_ORDERED=0 brings back the old behaviour, for comparison only.
+  - Faster start: the shader database (about 35,000 small files) is also kept as one file,
+    <serial>.pack next to the folder. The first start reads the loose files as before and
+    writes the pack in the background; later starts read the pack in one go and only the
+    files added since. SS_SHADER_PACK=0 reads the loose files. The 188 MB driver cache is not
+    saved again while the driver compiled nothing new (after the preload and every minute).
+  - Two experiments, off by default, in F3 > Graphics (next launch): "Copy Back Right After
+    the GPU Writes" and "Keep Pages Written Every Frame Unprotected". Their log lines:
+    "Readbacks: N copied right after..." and "Rewritten pages:".
+  - Measurements slimmed: the per-draw GPU checkpoints are off (SS_GPU_CHECKPOINTS=1 turns
+    them on), the hang record stays; copy-back sampling is off (SS_COPY_BACK_SAMPLES=1), the
+    Copy-backs: summary lines stay. gpu_hang_record.txt is now written.
+  - "Power:" log lines and a Power section in the report when the laptop switches between
+    mains power and battery.
   Shake (T): since build 43 along the controller's own up, so mouse aiming no longer turns it
   into a sideways motion the game does not count. Since build 44 holding G or H no longer turns
   the mouse's up and down around (stencil art works without P or tilting). Since build 45 T

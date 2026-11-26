@@ -3,7 +3,9 @@
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <cstdlib>
+#include <thread>
 #include <magic_enum/magic_enum.hpp>
 
 #include "adaptive/emulator_glue.h"
@@ -160,6 +162,17 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
              : zeros_guaranteed
                  ? "off (F3 to turn on, next launch)"
                  : "not available (the driver does not promise zeros for memory left out)");
+    if (const char* ordered = std::getenv("SS_LAZY_ZERO_ORDERED"); ordered && ordered[0] == '0') {
+        lazy_wake_ordered = false;
+        LOG_INFO(Render, "Woken empty buffer memory is bound without waiting for earlier work "
+                         "(SS_LAZY_ZERO_ORDERED=0)");
+    }
+    VideoCore::VramMonitor::keep_rewritten_pages.store(Adaptive::Glue::KeepRewrittenPages());
+    LOG_INFO(Render, "Experiment, pages written every frame kept unprotected: {}",
+             VideoCore::VramMonitor::keep_rewritten_pages.load() ? "on" : "off (F3 > Graphics)");
+    early_copy_back = Adaptive::Glue::EarlyCopyBack();
+    LOG_INFO(Render, "Experiment, copy back right after the GPU writes: {}",
+             early_copy_back ? "on" : "off (F3 > Graphics)");
     defer_uploads = EmulatorSettings.IsUploadThread();
     if (defer_uploads) {
         upload_thread = std::jthread{[this](std::stop_token token) { UploadThread(token); }};
@@ -367,6 +380,15 @@ void BufferCache::NoteComputeWriteTick(u64 tick) noexcept {
 }
 
 void BufferCache::TickFrame() {
+    // Pages kept unprotected change without faulting: memory read freely is synced again once a
+    // frame while there are any (build 51 experiment).
+    if (VideoCore::VramMonitor::rewritten_pages_kept.load(std::memory_order_relaxed) > 0) {
+        const u64 frame = Common::Perf::FrameNumber();
+        if (frame != kept_pages_frame) {
+            kept_pages_frame = frame;
+            cpu_modified_generation.fetch_add(1, std::memory_order_release);
+        }
+    }
     if (std::exchange(fault_process_pending, false)) {
         fault_manager->ProcessFaultBuffer();
     }
@@ -634,6 +656,56 @@ std::shared_ptr<BufferCache::Readback> BufferCache::RecordReadback(const Buffer*
     return readback;
 }
 
+void BufferCache::CopyBackWrittenHotWindowsSlow() {
+    // Game threads waited for copies back that were made ahead but not run yet: the GPU was 9.5
+    // ms behind, and the copy queued behind all of it (build 50). The memory they read back is
+    // copied right after the work that wrote it, in its command buffer, which is then submitted,
+    // so it is mostly done when the game reads. Once a frame a window at most.
+    const u64 frame = Common::Perf::FrameNumber();
+    boost::container::small_vector<std::shared_ptr<Readback>, 4> made;
+    bool on_graphics = false;
+    bool on_async = false;
+    for (const auto& written : early_written) {
+        const VAddr start = written.first;
+        const VAddr end = written.second;
+        const auto hot = std::ranges::find_if(hot_windows, [&](const HotWindow& window) {
+            return window.start == start && window.end == end;
+        });
+        if (hot == hot_windows.end() || hot->early_frame == frame) {
+            continue;
+        }
+        const bool in_flight = std::ranges::any_of(readbacks, [&](const auto& readback) {
+            return !readback->Done() && !readback->stale && readback->start <= start &&
+                   end <= readback->end;
+        });
+        if (in_flight || !memory_tracker->IsRegionGpuModified(start, end - start)) {
+            continue;
+        }
+        const auto [arena, window_start, window_end] = GetReadbackWindow(start, end - start);
+        if (const auto readback = RecordReadback(arena, window_start, window_end)) {
+            hot->early_frame = frame;
+            readback->prefetched = true;
+            ++readback_stats.early;
+            if (readback->semaphore == scheduler.GetWorkSemaphore()) {
+                on_graphics = true;
+            } else {
+                on_async = true;
+            }
+            made.push_back(readback);
+        }
+    }
+    early_written.clear();
+    if (made.empty()) {
+        return;
+    }
+    SubmitReadbacks(on_graphics, on_async);
+    {
+        std::scoped_lock lock{finished_readbacks_mutex};
+        finished_readbacks.insert(finished_readbacks.end(), made.begin(), made.end());
+    }
+    finished_readbacks_cv.notify_one();
+}
+
 void BufferCache::PrefetchReadbacks() {
     ApplyFinishedReadbacks();
     static const bool prefetch_off = Common::Tune("SHAD_PREFETCH_OFF", 0) != 0;
@@ -700,6 +772,12 @@ void BufferCache::PrefetchReadbacks() {
     if (now - last_readback_report >= std::chrono::seconds{10}) {
         last_readback_report = now;
         const double pickups = static_cast<double>(std::max<u64>(readback_stats.pickups, 1));
+        if (early_copy_back) {
+            LOG_INFO(Render,
+                     "Readbacks: {} copied right after the work that wrote them "
+                     "(experiment)",
+                     readback_stats.early);
+        }
         LOG_INFO(Render,
                  "Readbacks: {} on game thread faults, {} of those waited for a copy already "
                  "made, {} made ahead, {} written back before the game touched them, {} skipped "
@@ -1082,6 +1160,15 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     }
     if (is_written) {
         MarkGpuModifiedRange(device_addr, size);
+        if (early_copy_back && size <= 16_MB) {
+            for (const auto& window : hot_windows) {
+                if (window.start < device_addr + size && device_addr < window.end &&
+                    std::ranges::find(early_written, std::pair{window.start, window.end}) ==
+                        early_written.end()) {
+                    early_written.emplace_back(window.start, window.end);
+                }
+            }
+        }
     }
     return {arena, arena->Offset(device_addr)};
 }
@@ -1326,6 +1413,9 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
             });
         }
     }
+    if (!zeros.Empty()) {
+        pending_binds_wake_lazy = true;
+    }
     BindRanges(arena, bind_ranges, resident_blocks);
     if (!zeros.Empty()) {
         UploadAhead(arena, zeros);
@@ -1491,6 +1581,7 @@ void BufferCache::WakeBlocks(const Buffer* arena, const IntervalList<>& blocks) 
     for (const auto& range : blocks) {
         count += range.end - range.start;
     }
+    pending_binds_wake_lazy = true;
     BindRanges(arena, blocks, count);
     UploadAhead(arena, blocks);
     RemoveLazyZeroRanges(blocks);
@@ -1818,8 +1909,34 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_a
     return true;
 }
 
+void BufferCache::PrepareArenaBinds() {
+    bind_wait_tick = 0;
+    if (!pending_binds_wake_lazy || !lazy_wake_ordered || pending_binds.empty()) {
+        return;
+    }
+    // Called before the scheduler counts the new tick, so this is the last one flushed. With a
+    // recording thread it may not be at the driver yet; a bind on the same queue that waits for
+    // work submitted after it would stall the queue.
+    const u64 previous = scheduler.CurrentTick() - 1;
+    if (previous == 0) {
+        return;
+    }
+    // Bounded, so a recording thread waiting on this one can't hold it for good: past 100 ms
+    // the bind goes ahead as before and is counted as not waiting.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{100};
+    while (scheduler.SubmittedTick() < previous) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+            return;
+        }
+        std::this_thread::yield();
+    }
+    bind_wait_tick = previous;
+}
+
 void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
     if (pending_binds.empty()) {
+        pending_binds_wake_lazy = false;
+        bind_wait_tick = 0;
         return;
     }
 
@@ -1847,6 +1964,32 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
             wait_values.push_back(compute_tick);
         }
     }
+
+    // Blocks taken as zeros are read by work already sent (the texel buffers over most of the
+    // game's memory): sparse binds are not ordered with earlier work on the queue, so binding
+    // them while it runs gives it undefined memory in place of zeros, which can hang the GPU
+    // (device lost after 32 and 44 min with the switch on, none with it off). The bind now waits
+    // for the graphics work before it (build 51).
+    if (pending_binds_wake_lazy && lazy_wake_ordered) {
+        u64 wait_tick = bind_wait_tick;
+        if (wait_tick == 0) {
+            // Called inside the submit, after the scheduler counted this submit's tick.
+            const u64 tick = scheduler.CurrentTick();
+            const u64 previous = tick >= 2 ? tick - 2 : 0;
+            if (previous != 0 && scheduler.SubmittedTick() >= previous) {
+                wait_tick = previous;
+            }
+        }
+        if (wait_tick != 0) {
+            wait_semas.push_back(scheduler.GetWorkSemaphore()->Handle());
+            wait_values.push_back(wait_tick);
+            VideoCore::VramMonitor::lazy_wake_binds.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            VideoCore::VramMonitor::lazy_wake_unordered.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+    pending_binds_wake_lazy = false;
+    bind_wait_tick = 0;
 
     const vk::TimelineSemaphoreSubmitInfo timeline_si = {
         .waitSemaphoreValueCount = static_cast<u32>(wait_semas.size()),

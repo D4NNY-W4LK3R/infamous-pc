@@ -7,8 +7,12 @@
 #include "common/singleton.h"
 #include "common/types.h"
 
+#include <deque>
 #include <functional>
+#include <mutex>
+#include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace Storage {
@@ -44,9 +48,27 @@ public:
     void ForEachBlob(BlobType type, const std::function<void(std::vector<u8>&& data)>& func);
 
 private:
+    /// The loose files read into memory at Open: from the pack file and the files written since
+    /// it was made (build 51).
+    struct PackedBlob {
+        const u8* data{};
+        u32 size{};
+    };
+    void OpenPack();
+    void WritePack();
+    bool LoadPacked(const std::string& file_name, std::vector<u8>& data);
+
     std::jthread io_worker{};
     std::filesystem::path cache_path{};
+    std::filesystem::path pack_path{};
     bool opened{};
+    /// Recursive: loading a pipeline from ForEachBlob loads its shaders by name.
+    std::recursive_mutex pack_mutex{};
+    bool pack_active{};
+    bool pack_dirty{};
+    std::vector<u8> pack_bytes{};
+    std::deque<std::vector<u8>> loose_bytes{};
+    std::unordered_map<std::string, PackedBlob> packed{};
 };
 
 } // namespace Storage

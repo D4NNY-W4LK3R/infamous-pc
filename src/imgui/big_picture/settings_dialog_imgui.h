@@ -126,6 +126,8 @@ private:
     bool particleLightsSetting = false;
     bool vramPrioritiesSetting = false;
     bool lazyZeroSetting = false;
+    bool earlyCopyBackSetting = false;
+    bool keepRewrittenSetting = false;
     // Frame-rate target: the optimizer picks the performance mode per launch.
     const std::vector<std::string> fpsTargetOptions = {"Off", "30", "40", "45", "60"};
     const std::vector<u32> fpsTargetValues = {0, 30, 40, 45, 60};

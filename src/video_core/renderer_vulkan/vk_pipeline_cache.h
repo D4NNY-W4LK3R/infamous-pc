@@ -224,6 +224,9 @@ private:
     vk::UniquePipelineCache pipeline_cache;
     vk::UniquePipelineLayout pipeline_layout;
     DriverCacheSaver* driver_saver{};
+    /// PipelineTiming::DriverCompiles() when the driver's cache was last loaded or saved; while
+    /// it stays the same, saving the 188 MB cache again is skipped (build 51).
+    u64 driver_compiles_saved{~u64{0}};
     Shader::Profile profile{};
     Shader::Pools pools;
     DrawIndirectParams draw_indirect_params{};

@@ -123,6 +123,16 @@ UserSettings ParseSettings(const std::string& text) {
             (key == "render_height" ? s.render_height : s.auto_render_min) =
                 NormalizeRenderHeight(v);
         } else if (key == "lazy_zero_memory") {
+            // Build 44-50 name, when the switch was off by default: build 51 turns it on once.
+            continue;
+        } else if (key == "early_copy_back" || key == "keep_rewritten_pages") {
+            const auto b = ParseBool(value);
+            if (!b) {
+                s.warnings.push_back(key + " '" + value + "' is not 0/1");
+                continue;
+            }
+            (key == "early_copy_back" ? s.early_copy_back : s.keep_rewritten_pages) = *b;
+        } else if (key == "empty_memory_out") {
             const auto b = ParseBool(value);
             if (!b) {
                 s.warnings.push_back(key + " '" + value + "' is not 0/1");
@@ -183,8 +193,12 @@ std::string SerializeSettings(const UserSettings& s) {
          "# images drawn to next, textures last (F3 settings > Graphics; next launch)\n";
     o << "vram_priorities = " << (s.vram_priorities ? 1 : 0) << '\n';
     o << "# leave empty buffer memory out of video memory until data lands there (F3 settings >\n"
-         "# Graphics; next launch)\n";
-    o << "lazy_zero_memory = " << (s.lazy_zero_memory ? 1 : 0) << '\n';
+         "# Graphics; next launch; on by default since build 51)\n";
+    o << "empty_memory_out = " << (s.lazy_zero_memory ? 1 : 0) << '\n';
+    o << "# experiments (F3 settings > Graphics; next launch): copy back what the game reads\n"
+         "# right after the GPU wrote it; keep pages written every frame unprotected\n";
+    o << "early_copy_back = " << (s.early_copy_back ? 1 : 0) << '\n';
+    o << "keep_rewritten_pages = " << (s.keep_rewritten_pages ? 1 : 0) << '\n';
     o << "# frame-rate target: the optimizer picks the performance mode per launch, from\n"
          "# perf_mode (your choice) down to auto_perf_max (off | low | office); 0 = off\n";
     o << "fps_target = " << s.fps_target << '\n';
@@ -219,6 +233,16 @@ UserSettings LoadSettings(const std::filesystem::path& file,
             s.perf_mode = parsed.perf_mode;
         } else {
             s.warnings.push_back("SHADPS4_PERF_MODE '" + *v + "' must be off, low or office");
+        }
+    }
+    if (const auto v = env("SS_EARLY_COPY_BACK")) {
+        if (const auto b = ParseBool(*v)) {
+            s.early_copy_back = *b;
+        }
+    }
+    if (const auto v = env("SS_KEEP_REWRITTEN_PAGES")) {
+        if (const auto b = ParseBool(*v)) {
+            s.keep_rewritten_pages = *b;
         }
     }
     if (const auto v = env("SS_LAZY_ZERO_MEMORY")) {

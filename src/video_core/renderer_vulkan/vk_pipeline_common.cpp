@@ -94,6 +94,11 @@ u64 DatabaseNanoseconds() noexcept {
     return database_ns.load(std::memory_order_relaxed);
 }
 
+u64 DriverCompiles() noexcept {
+    return preload_counts.misses.load() + preload_counts.no_feedback.load() +
+           game_counts.misses.load() + game_counts.no_feedback.load();
+}
+
 std::string Summary(bool preload) {
     const Counts& c = preload ? preload_counts : game_counts;
     const u64 created = c.created.load();

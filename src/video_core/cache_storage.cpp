@@ -13,7 +13,10 @@
 
 #include <miniz.h>
 
+#include <chrono>
 #include <condition_variable>
+#include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <future>
 #include <mutex>
@@ -34,7 +37,17 @@ bool ar_is_read_only{true};
 
 namespace Storage {
 
+std::string GetBlobFileExtensionString(BlobType type);
+
 namespace {
+
+/// The file name a blob has in the folder, as LoadVector makes it.
+std::string PackedName(BlobType type, const std::string& name) {
+    return std::filesystem::path{name}
+        .replace_extension(GetBlobFileExtensionString(type))
+        .filename()
+        .string();
+}
 
 /// A cache this large takes longer to preload than rebuilding it in game costs, so it starts over.
 constexpr u64 MaxCacheSize = 2_GB;
@@ -105,6 +118,10 @@ constexpr std::string GetBlobFileExtension(BlobType type) {
     }
 }
 
+std::string GetBlobFileExtensionString(BlobType type) {
+    return GetBlobFileExtension(type);
+}
+
 void DataBase::Open() {
     if (opened) {
         return;
@@ -132,10 +149,15 @@ void DataBase::Open() {
         if (!std::filesystem::exists(cache_path)) {
             std::filesystem::create_directories(cache_path);
         }
+        pack_path = GetUserPath(PathType::CacheDir) /
+                    std::filesystem::path{game_info.GameSerial()}.replace_extension(".pack");
     }
 
     io_worker = std::jthread{ProcessIO};
     opened = true;
+    if (!EmulatorSettings.IsPipelineCacheArchived()) {
+        OpenPack();
+    }
 
     std::error_code ec;
     const u64 size = EmulatorSettings.IsPipelineCacheArchived()
@@ -161,6 +183,14 @@ void DataBase::Clear() {
     } else {
         std::filesystem::remove_all(cache_path, ec);
         std::filesystem::create_directories(cache_path, ec);
+        std::error_code pack_ec;
+        std::filesystem::remove(pack_path, pack_ec);
+        std::scoped_lock lock{pack_mutex};
+        pack_active = false;
+        pack_dirty = false;
+        packed.clear();
+        loose_bytes.clear();
+        std::vector<u8>{}.swap(pack_bytes);
     }
     if (ec) {
         LOG_WARNING(Render, "Failed to clear the cache at {}: {}", cache_path.string(),
@@ -260,6 +290,9 @@ void DataBase::Load(BlobType type, const std::string& name, std::vector<u8>& dat
     if (!opened) {
         return;
     }
+    if (pack_active && LoadPacked(PackedName(type, name), data)) {
+        return;
+    }
 
     auto path = EmulatorSettings.IsPipelineCacheArchived() ? std::filesystem::path{name}
                                                            : cache_path / name;
@@ -269,6 +302,14 @@ void DataBase::Load(BlobType type, const std::string& name, std::vector<u8>& dat
 void DataBase::Load(BlobType type, const std::string& name, std::vector<u32>& data) {
     if (!opened) {
         return;
+    }
+    if (pack_active) {
+        std::vector<u8> bytes;
+        if (LoadPacked(PackedName(type, name), bytes)) {
+            data.resize(bytes.size() / sizeof(u32));
+            std::memcpy(data.data(), bytes.data(), data.size() * sizeof(u32));
+            return;
+        }
     }
 
     auto path = EmulatorSettings.IsPipelineCacheArchived() ? std::filesystem::path{name}
@@ -290,6 +331,14 @@ void DataBase::ForEachBlob(BlobType type, const std::function<void(std::vector<u
                 std::vector<u8> data(stat.m_uncomp_size);
                 mz_zip_reader_extract_to_mem(&zip_ar, index, data.data(), data.size(), 0);
                 func(std::move(data));
+            }
+        }
+    } else if (pack_active) {
+        std::scoped_lock lock{pack_mutex};
+        for (const auto& [file_name, blob] : packed) {
+            if (file_name.ends_with(ext) && file_name.size() > ext.size() &&
+                file_name[file_name.size() - ext.size() - 1] == '.') {
+                func(std::vector<u8>(blob.data, blob.data + blob.size));
             }
         }
     } else {
@@ -314,7 +363,211 @@ void DataBase::FinishPreload() {
     if (EmulatorSettings.IsPipelineCacheArchived()) {
         mz_zip_writer_init_from_reader(&zip_ar, cache_path.string().c_str());
         ar_is_read_only = false;
+        return;
     }
+    if (!pack_active) {
+        return;
+    }
+    // The pack is rewritten when files were read loose (new since it was made), on the cache's
+    // own thread so the game starts meanwhile; the memory goes once it is written or was current.
+    {
+        std::scoped_lock lock{m_request};
+        req_queue.emplace([this] { WritePack(); });
+    }
+    std::scoped_lock lk{submit_mutex};
+    ++num_requests;
+    request_cv.notify_one();
+}
+
+namespace {
+
+constexpr u32 PackMagic = 0x4B505353; // "SSPK"
+constexpr u32 PackVersion = 1;
+
+bool PackDisabled() {
+    const char* env = std::getenv("SS_SHADER_PACK");
+    return env && env[0] == '0';
+}
+
+} // namespace
+
+void DataBase::OpenPack() {
+    // The shader database is about 35,000 small files: opening each on a hard disk took 392 s of
+    // a 409 s start (build 50). They are also kept in one file, read in one go; only the files
+    // written since it was made are opened one by one (build 51).
+    if (PackDisabled()) {
+        LOG_INFO(Render, "Startup: shader pack off (SS_SHADER_PACK=0), reading loose files");
+        return;
+    }
+    using Clock = std::chrono::steady_clock;
+    const auto start = Clock::now();
+    std::scoped_lock lock{pack_mutex};
+    pack_active = true;
+    packed.clear();
+    loose_bytes.clear();
+    std::vector<u8>{}.swap(pack_bytes);
+
+    u32 from_pack = 0;
+    std::error_code time_ec;
+    const auto pack_time = std::filesystem::last_write_time(pack_path, time_ec);
+    {
+        using namespace Common::FS;
+        const IOFile file{pack_path, FileAccessMode::Read};
+        if (file.IsOpen()) {
+            pack_bytes.resize(file.GetSize());
+            if (file.Read(pack_bytes) != pack_bytes.size()) {
+                pack_bytes.clear();
+            }
+        }
+    }
+    const auto read_done = Clock::now();
+    if (pack_bytes.size() >= 12) {
+        u32 header[3];
+        std::memcpy(header, pack_bytes.data(), sizeof(header));
+        size_t pos = sizeof(header);
+        bool valid = header[0] == PackMagic && header[1] == PackVersion;
+        for (u32 i = 0; valid && i < header[2]; ++i) {
+            u16 name_len{};
+            u32 size{};
+            if (pos + sizeof(name_len) > pack_bytes.size()) {
+                valid = false;
+                break;
+            }
+            std::memcpy(&name_len, pack_bytes.data() + pos, sizeof(name_len));
+            pos += sizeof(name_len);
+            if (pos + name_len + sizeof(size) > pack_bytes.size()) {
+                valid = false;
+                break;
+            }
+            std::string name{reinterpret_cast<const char*>(pack_bytes.data() + pos), name_len};
+            pos += name_len;
+            std::memcpy(&size, pack_bytes.data() + pos, sizeof(size));
+            pos += sizeof(size);
+            if (pos + size > pack_bytes.size()) {
+                valid = false;
+                break;
+            }
+            packed[std::move(name)] = PackedBlob{pack_bytes.data() + pos, size};
+            pos += size;
+        }
+        if (!valid) {
+            LOG_WARNING(Render, "Startup: shader pack {} is damaged, reading loose files",
+                        pack_path.string());
+            packed.clear();
+            std::vector<u8>{}.swap(pack_bytes);
+        }
+        from_pack = static_cast<u32>(packed.size());
+    }
+
+    // Listing the folder doesn't open its files: only names and sizes the pack lacks are read.
+    u32 loose = 0;
+    std::error_code ec;
+    std::filesystem::directory_iterator it{cache_path, ec};
+    while (!ec && it != std::filesystem::directory_iterator{}) {
+        std::error_code entry_ec;
+        if (it->is_regular_file(entry_ec)) {
+            const std::string name = it->path().filename().string();
+            const u64 size = it->file_size(entry_ec);
+            std::error_code write_ec;
+            const bool newer = time_ec || it->last_write_time(write_ec) > pack_time || write_ec;
+            const auto found = packed.find(name);
+            if (!entry_ec && (found == packed.end() || found->second.size != size || newer)) {
+                using namespace Common::FS;
+                const IOFile file{it->path(), FileAccessMode::Read};
+                if (file.IsOpen()) {
+                    auto& bytes = loose_bytes.emplace_back(file.GetSize());
+                    file.Read(bytes);
+                    packed[name] = PackedBlob{bytes.data(), static_cast<u32>(bytes.size())};
+                    ++loose;
+                }
+            }
+        }
+        it.increment(ec);
+    }
+    pack_dirty = loose > 0;
+    LOG_INFO(Render,
+             "Startup: shader pack: {} files from {} ({} MB, read in {:.1f} s), {} loose files "
+             "read that it lacks, {:.1f} s in all",
+             from_pack, pack_path.filename().string(), pack_bytes.size() >> 20,
+             std::chrono::duration<double>(read_done - start).count(), loose,
+             std::chrono::duration<double>(Clock::now() - start).count());
+}
+
+bool DataBase::LoadPacked(const std::string& file_name, std::vector<u8>& data) {
+    std::scoped_lock lock{pack_mutex};
+    if (!pack_active) {
+        return false;
+    }
+    const auto it = packed.find(file_name);
+    if (it == packed.end()) {
+        return false;
+    }
+    data.assign(it->second.data, it->second.data + it->second.size);
+    return true;
+}
+
+void DataBase::WritePack() {
+    std::scoped_lock lock{pack_mutex};
+    if (!pack_active) {
+        return;
+    }
+    if (pack_dirty && !packed.empty()) {
+        const auto start = std::chrono::steady_clock::now();
+        auto temp = pack_path;
+        temp += ".tmp";
+        bool ok = false;
+        u64 bytes_written = 0;
+        {
+            using namespace Common::FS;
+            IOFile file{temp, FileAccessMode::Create};
+            if (file.IsOpen()) {
+                std::vector<u8> out;
+                out.reserve(16_MB);
+                const auto put = [&](const void* src, size_t n) {
+                    const auto* p = static_cast<const u8*>(src);
+                    out.insert(out.end(), p, p + n);
+                };
+                const u32 header[3] = {PackMagic, PackVersion, static_cast<u32>(packed.size())};
+                put(header, sizeof(header));
+                ok = true;
+                for (const auto& [name, blob] : packed) {
+                    const u16 name_len = static_cast<u16>(name.size());
+                    put(&name_len, sizeof(name_len));
+                    put(name.data(), name.size());
+                    put(&blob.size, sizeof(blob.size));
+                    put(blob.data, blob.size);
+                    if (out.size() >= 16_MB) {
+                        ok = ok && file.Write(out) == out.size();
+                        bytes_written += out.size();
+                        out.clear();
+                    }
+                }
+                ok = ok && file.Write(out) == out.size();
+                bytes_written += out.size();
+                ok = ok && file.Flush();
+            }
+        }
+        std::error_code ec;
+        if (ok) {
+            std::filesystem::rename(temp, pack_path, ec);
+        }
+        if (!ok || ec) {
+            std::filesystem::remove(temp, ec);
+            LOG_WARNING(Render, "Shader pack could not be written; the next start reads the "
+                                "loose files again");
+        } else {
+            LOG_INFO(
+                Render, "Shader pack written: {} files, {} MB in {:.1f} s", packed.size(),
+                bytes_written >> 20,
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
+        }
+    }
+    // The loose files stay as they are: they are the database, the pack only reads it faster.
+    pack_active = false;
+    pack_dirty = false;
+    packed.clear();
+    loose_bytes.clear();
+    std::vector<u8>{}.swap(pack_bytes);
 }
 
 } // namespace Storage

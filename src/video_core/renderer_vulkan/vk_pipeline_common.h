@@ -47,6 +47,9 @@ void NoteCreation(bool compute, const vk::PipelineCreationFeedback& feedback,
 void NoteModule(std::chrono::steady_clock::duration took) noexcept;
 void NoteDatabaseRead(std::chrono::steady_clock::duration took) noexcept;
 u64 Created(bool preload) noexcept;
+/// Pipelines the driver compiled rather than took from its cache (or didn't say), preload and
+/// game together: while this stays the same, the driver's cache holds nothing new.
+u64 DriverCompiles() noexcept;
 u64 ModuleNanoseconds() noexcept;
 u64 DatabaseNanoseconds() noexcept;
 /// The driver's part: from its cache or compiled, how often and how long. preload: the

@@ -31,6 +31,15 @@ extern std::atomic<u32> image_count;
 extern std::atomic<u32> raised_image_blocks;
 /// Buffer memory left out of video memory as zeros (build 44).
 extern std::atomic<u64> lazy_zero_bytes;
+/// Binds that woke blocks left out as zeros: waiting for the work before them, and those that
+/// could not (build 51).
+extern std::atomic<u64> lazy_wake_binds;
+extern std::atomic<u64> lazy_wake_unordered;
+/// Pages written again every frame kept unprotected (build 51 experiment): whether it is on,
+/// how many pages are kept, and the bytes uploaded for them because they were.
+extern std::atomic<bool> keep_rewritten_pages;
+extern std::atomic<s64> rewritten_pages_kept;
+extern std::atomic<u64> rewritten_upload_bytes;
 
 /// Starts the monitor's thread (once), and stops it before the instance goes.
 void Start(const Vulkan::Instance& instance);

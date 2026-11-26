@@ -42,7 +42,7 @@ enum class QueueOp : u8 {
 void Init(vk::Device device, vk::Queue graphics, vk::Queue compute, vk::Queue async,
           bool checkpoints, bool device_fault);
 
-/// True when checkpoints are written. Off with SS_GPU_CHECKPOINTS=0.
+/// True when checkpoints are written. On with SS_GPU_CHECKPOINTS=1 (off by default, build 51).
 bool CheckpointsOn() noexcept;
 
 /// Names a piece of work and returns the marker for vkCmdSetCheckpointNV, or nullptr when

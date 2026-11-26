@@ -471,6 +471,12 @@ public:
     /// wait for work behind it. Without a recording thread, flushed work is submitted right away.
     void WaitSubmitted(u64 tick);
 
+    /// The last tick whose work reached the driver. Without a recording thread every flushed tick
+    /// has.
+    [[nodiscard]] u64 SubmittedTick() const noexcept {
+        return stream ? submitted_tick.load(std::memory_order_acquire) : CurrentTick() - 1;
+    }
+
     /// Attempts to execute operations whose tick the GPU has caught up with.
     void PopPendingOperations();
 

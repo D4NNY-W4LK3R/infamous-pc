@@ -237,12 +237,16 @@ void Init(vk::Device device, vk::Queue graphics, vk::Queue compute, vk::Queue as
     graphics_queue = graphics;
     compute_queue = compute;
     async_queue = async;
+    // Off by default since build 51: the hang record keeps its queue operations and fault report,
+    // and checkpoints at every draw are only wanted while hunting a hang.
     const char* env = std::getenv("SS_GPU_CHECKPOINTS");
-    const bool wanted = !(env && env[0] == '0');
+    const bool wanted = env && env[0] == '1';
     checkpoints_on = checkpoints && wanted;
     fault_on = device_fault;
     LOG_INFO(Render_Vulkan, "GPU hang record: checkpoints {}, device fault report {}",
-             checkpoints_on ? "on" : (checkpoints ? "off (SS_GPU_CHECKPOINTS=0)" : "unavailable"),
+             checkpoints_on
+                 ? "on (SS_GPU_CHECKPOINTS=1)"
+                 : (checkpoints ? "off (SS_GPU_CHECKPOINTS=1 turns them on)" : "unavailable"),
              fault_on ? "available" : "unavailable");
 }
 
@@ -327,7 +331,7 @@ void OnDeviceLost(std::string_view where) noexcept {
         try {
             const auto path =
                 Common::FS::GetUserPath(Common::FS::PathType::LogDir) / "gpu_hang_record.txt";
-            Common::FS::IOFile file{path, Common::FS::FileAccessMode::Write,
+            Common::FS::IOFile file{path, Common::FS::FileAccessMode::Create,
                                     Common::FS::FileType::TextFile};
             if (file.IsOpen()) {
                 file.WriteString(text);

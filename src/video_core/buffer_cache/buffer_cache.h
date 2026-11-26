@@ -199,10 +199,25 @@ public:
     /// Synchronizes all buffers needed for DMA.
     void SynchronizeDmaBuffers();
 
+    /// Before the scheduler takes its queue lock: when the pending binds wake blocks left out as
+    /// zeros, waits until the work flushed before reaches the driver, so the bind can wait for it
+    /// on the GPU (build 51).
+    void PrepareArenaBinds();
+
+    /// Copies back the windows game threads read that the work recorded last wrote (build 51
+    /// experiment, F3). Called before each draw and dispatch and on fences.
+    void CopyBackWrittenHotWindows() {
+        if (!early_written.empty()) {
+            CopyBackWrittenHotWindowsSlow();
+        }
+    }
+
     /// Commits pending sparse buffer memory binds. Must be called before every scheduler submit.
     void SubmitPendingArenaBinds(Vulkan::SubmitInfo& info);
 
 private:
+    void CopyBackWrittenHotWindowsSlow();
+
     using DownloadCopies = boost::container::small_vector<vk::BufferCopy, 8>;
 
     /// A copy of GPU modified memory back to the game, recorded and submitted by the GPU thread
@@ -374,14 +389,23 @@ private:
         /// Chances to copy it ahead skipped after copies of it went stale, and still to skip.
         u8 backoff{};
         u8 skip{};
+        /// Frame it was last copied back right after the work writing it (build 51).
+        u64 early_frame{~u64{0}};
     };
     std::vector<HotWindow> hot_windows;
+    /// Experiment (build 51): windows game threads read back that the work just recorded wrote,
+    /// copied back right after it so the copy is done before the game reads.
+    bool early_copy_back{};
+    u64 kept_pages_frame{};
+    boost::container::small_vector<std::pair<VAddr, VAddr>, 4> early_written;
     struct ReadbackStats {
         u64 on_fault{};
         u64 joined{};
         u64 prefetched{};
         u64 written_ahead{};
         u64 skipped{};
+        /// Copies made right after the work that wrote them (build 51 experiment).
+        u64 early{};
         /// Time from game threads asking for copies back to the GPU thread taking them up.
         u64 pickup_ns{};
         u64 pickups{};
@@ -447,6 +471,13 @@ private:
     std::array<const Buffer*, NUM_ARENA_PAGES> address_space{};
     std::deque<Buffer> arenas;
     std::vector<ArenaBinds> pending_binds;
+    /// The pending binds make blocks resident that work already sent may read as zeros: binding
+    /// them before that work is done gives it undefined memory in place of zeros (build 51).
+    bool pending_binds_wake_lazy{};
+    /// Graphics tick the next bind waits for, set by PrepareArenaBinds; 0 when none.
+    u64 bind_wait_tick{};
+    /// SS_LAZY_ZERO_ORDERED=0 binds woken blocks without waiting, as before build 51.
+    bool lazy_wake_ordered{true};
     Vulkan::Semaphore memory_semaphore;
 
     struct Backing : public Interval {

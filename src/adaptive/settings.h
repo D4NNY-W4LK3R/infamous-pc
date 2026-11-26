@@ -20,8 +20,13 @@
 //   fps_target = 0         the optimizer lowers the game's quality level (per launch) to reach
 //                          this frame rate; 0 = off
 //   auto_perf_max = off    the lowest quality it may use: off (none) | low | office
-//   lazy_zero_memory = 0   leave empty buffer memory out of video memory (next launch;
-//                          SS_LAZY_ZERO_MEMORY)
+//   empty_memory_out = 1   leave empty buffer memory out of video memory (next launch;
+//                          SS_LAZY_ZERO_MEMORY). On by default since build 51; the older key
+//                          lazy_zero_memory is read no more, so every setup starts with it on.
+//   early_copy_back = 0    experiment: copy back what game threads read right after the GPU
+//                          wrote it (next launch; SS_EARLY_COPY_BACK)
+//   keep_rewritten_pages = 0  experiment: pages written every frame stay unprotected (next
+//                          launch; SS_KEEP_REWRITTEN_PAGES)
 //   vram_priorities = 0    memory priorities for the driver: buffers highest, images drawn to
 //                          next, textures last (next launch; SS_VRAM_PRIORITIES)
 //
@@ -64,7 +69,12 @@ struct UserSettings {
     bool vram_priorities = false;
     /// Empty buffer memory left out of video memory (build 44, next launch): blocks of the large
     /// ranges the game reads that hold only zeros are not made resident until data lands there.
-    bool lazy_zero_memory = false;
+    bool lazy_zero_memory = true;
+    /// Experiments (build 51, next launch, off by default): copy back the memory game threads
+    /// read back right after the GPU work that writes it; keep pages the game writes again every
+    /// frame unprotected and upload them every frame.
+    bool early_copy_back = false;
+    bool keep_rewritten_pages = false;
     std::vector<std::string> warnings; ///< unknown keys, bad values (not fatal)
 };
 
