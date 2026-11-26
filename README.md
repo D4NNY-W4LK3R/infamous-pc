@@ -5,24 +5,19 @@ SPDX-License-Identifier: GPL-2.0-or-later
 
 <div align="center">
 
-# infamous-pc
+# Second Son Adaptive
 
-### inFAMOUS Second Son on PC — an emulator build tuned for one game
+### inFAMOUS Second Son on PC with native mouse and keyboard, built for 4 GB graphics cards
 
-**~1.8× the frame rate and much steadier frame pacing than the native PC port we measured, on the same machine and the same title-screen scene.**
-
-[**⬇ Download (Windows x64)**](https://github.com/MeWeGo/infamous-pc/releases/latest) ·
-[Quick start](#quick-start) ·
-[Benchmarks](#benchmarks) ·
-[Tuning](#tuning) ·
-[Build](#build-from-source) ·
+[**⬇ Download (Windows x64)**](https://github.com/D4NNY-W4LK3R/infamous-pc/releases) ·
+[What it adds](#what-it-adds) ·
+[Set up](#set-up) ·
+[Reporting problems](#reporting-problems) ·
 [Credits](#credits)
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64-blue)
-![Graphics](https://img.shields.io/badge/graphics-Vulkan%201.3-red)
+![Graphics](https://img.shields.io/badge/graphics-Vulkan-red)
 ![License](https://img.shields.io/badge/license-GPL--2.0--or--later-green)
-[![Downloads](https://img.shields.io/github/downloads/MeWeGo/infamous-pc/total.svg)](https://github.com/MeWeGo/infamous-pc/releases)
-[![Stars](https://img.shields.io/github/stars/MeWeGo/infamous-pc?style=flat)](https://github.com/MeWeGo/infamous-pc/stargazers)
 
 </div>
 
@@ -30,146 +25,111 @@ SPDX-License-Identifier: GPL-2.0-or-later
 
 ## What is this?
 
-`infamous-pc` runs **inFAMOUS Second Son** (CUSA00223, update 1.07) and **inFAMOUS First Light** on Windows through a [shadPS4](https://github.com/shadps4-emu/shadPS4) fork whose only goal is **speed and stability on these games**. Everything in the render path — buffer cache, readbacks, upload threads, pipeline compilation — is profiled against inFAMOUS and tuned for it, not for the average PS4 title.
+**Second Son Adaptive** is a fork of [infamous-pc](https://github.com/MeWeGo/infamous-pc), the
+[shadPS4](https://github.com/shadps4-emu/shadPS4) build tuned for **inFAMOUS Second Son**. It
+keeps infamous-pc's speed work and adds what playing it on a PC needs: true mouse look and
+keyboard controls, the touchpad and motion sensor from the mouse, and a lot of work to keep the
+game smooth on a card with only 4 GB of video memory (developed on a GTX 1650 laptop).
+
+It runs update **01.07** of the EU (CUSA00004) and US (CUSA00223) releases. Every change to the
+game's code is checked byte for byte first and skipped on any other version.
 
 > [!NOTE]
-> No game files are included. You need your own dump of the game (base + update 1.07 merged in one folder) and system modules (`sys_modules`) from your own PS4. Bugs and glitches remain; this is a performance-first build.
+> No game files are included. You need your own dump of the game (base + update 1.07 merged
+> in one folder, the one with `eboot.bin`) and the system modules (`sys_modules`) from your own
+> PS4.
 
-## Quick start
+## What it adds
 
-1. Download `infamous-pc-<version>-windows-x86_64.zip` from the [latest release](https://github.com/MeWeGo/infamous-pc/releases/latest) and extract it.
-2. Install the [Visual C++ Redistributable 2015–2022 (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe) if you have not already.
-3. Run **`Play inFAMOUS.bat`** and paste the path of the folder that contains `eboot.bin` (or drag the folder onto the `.bat`).
-4. **First launch compiles shaders, so expect stutter.** Keep the shader cache (`%APPDATA%\shadPS4\cache`) — it is what makes every later launch smooth.
+**Native mouse and keyboard**
+- True 1:1 mouse look in gameplay through a hook on the game's own camera (only installed on a
+  measured game build); everywhere else the mouse drives the right stick and the motion sensor.
+- An on-screen key panel next to the PlayStation button prompts, read from your real bindings
+  (Home shows / hides it).
+- The touchpad from the mouse: hold the middle (or back side) button and the mouse is a finger
+  on the pad - tap, hold, swipe, a second finger with the right button.
+- The motion sensor from keys and mouse for the spray can: tilt (G / H), shake (hold T), and
+  flip keys for stencils that paint the wrong way (P, N, M).
 
-Equivalent manual command:
+**Performance analyser and frame-rate target (F1)**
+- Measures every second of play: frame times, what holds the frame rate back (the graphics
+  card, the emulator's GPU thread, or the game's own threads waiting on shared memory), freezes,
+  scene switches, video memory, power. Each session writes a plain-text report.
+- An optional frame-rate target picks the game's performance mode and render size once per
+  launch, never below the lowest quality you allow. It changes nothing while you play.
 
-```sh
-shadps4.exe --show-fps -g "<path-to>\CUSA00223-merged\eboot.bin"
-```
+**The 4 GB video memory work**
+- Empty buffer memory left out of video memory (on by default): about 1.4 GB of the memory the
+  game reads holds only zeros and is not kept on the card. Seconds under 30 fps went from 65% to
+  about 21% on the GTX 1650.
+- A GPU hang record and "VRAM:" / "Copy-backs:" log lines for finding what is left, and an
+  experimental fault-ahead switch for the game's write faults on shared memory.
 
-**In-game keys:** `F10` FPS counter · `F11` fullscreen · `F12` screenshot / RenderDoc capture. Xbox, DualShock and DualSense controllers work out of the box; touchpad swipes are mapped to the pad (see [Controls](#controls)).
+**Second Son game patches (F3 > Graphics, next launch)**
+- The game's own lower quality levels (Low / Office), smaller render sizes with the HUD kept at
+  its size, office-level textures, and the particle patches of shadPS4-second-son v1.1.1.
 
-## Benchmarks
-
-Same PC, same game files, same live-3D title scene, no input, warm shader caches, fresh process per run.
-
-**Test system:** AMD Ryzen 7 5800H · NVIDIA GeForce RTX 3070 Laptop (8 GB) · 32 GB RAM · Windows 11
-
-| Build | Median FPS | Worst frame | Draws / frame |
-| :--- | :---: | :---: | :---: |
-| **infamous-pc** (`ecafe1e3`, this repo) | **30.6** | **40 ms** | ~7,950 |
-| [iss_pc](https://github.com/HayatoG/iss_pc) beta `88e912f`, renderer v1 | 16.6 | ~150–170 ms | ~7,575 |
-| [iss_pc](https://github.com/HayatoG/iss_pc) `9c24de1` (Oct 16 release), renderer v1 | 14.9 | ~170–180 ms | ~7,550 |
-
-What this does **and does not** show:
-
-- It is a **title-scene** measurement. Gameplay (open-world streaming, powers, cutscenes) has **not** been benchmarked yet; numbers there will differ. Community results on other hardware are very welcome — please open an issue with your GPU, CPU and FPS-counter screenshot.
-- Both builds translate roughly the same draw stream on the CPU side. The host GPU is far from saturated in both cases; the difference is how efficiently the command processor records and submits work.
-- `iss_pc` renderer v2 (native passes) was **not** compared fairly: our run overlapped its first-launch compile of ~8,000 compute shaders, so we make no claim about it.
-- Method: launch with `--show-fps`, discard shader-compile warm-up, take the median of ≥20 stats windows (10 s each for `infamous-pc`, 5 s each for `iss_pc`).
-
-## What makes it fast
-
-Work done on top of upstream shadPS4, grouped by theme:
-
-**Frame pacing & CPU cost**
-- Dedicated **upload worker** moves upload copies and page protection off the GPU thread; large uploads are split into parts.
-- **Deferred readbacks:** only the thread that needs the data waits, and only for the submission that wrote it.
-- Buffer-cache **readback window tuned to 128 KB** and prefetch backoff to **1** for inFAMOUS (built-in defaults).
-- **Static red-zone / SSE4a patching** enabled by default; duplicate vertex/index buffer binds removed.
-- Recorder-thread descriptor sets, texture/binding fast paths, narrower draw barriers.
-- Optional **second compute queue** (async compute) — off by default, `SHADPS4_ASYNC_COMPUTE=1` to try it.
-
-**Stability & VRAM**
-- Residency allocation **retries on out-of-memory**, allocates past the budget instead of failing, and logs memory use.
-- Pageable device-local memory; pipeline creation retried if the driver fails.
-- Persistent driver `VkPipelineCache` across launches.
-- Single-queue readback, wave64 atomics, SRT-walker overrun and window-visibility fixes.
-
-**Shaders**
-- BP01–BP12 backports, wave64 ballot lowering with an exhaustive order-independent uniformity check (`ReachesLaneVaryingSource`), shared-memory (LDS) barriers, SDWA-compare and unnormalized-sampler fixes, shader patches applied to cached shaders, async compute-pipeline builds.
-
-**Input**
-- Gamepad touchpad swipes, two-finger swipes, stick-driven touchpad fingers (L3/R3).
+**Cheats (F1 > Cheats)**
+- Infinite energy, bombs, shards, finisher, Neon / Video dash and a longer Smoke dash, each
+  byte-checked and switched on at once; "keep on" remembers them.
 
 **Diagnostics**
-- GPU draw timing, per-frame perf lines (`OnFlip: Perf:`), sampling profiler, and lock-free read-fault guest-RIP aggregation to find which game code stalls on page faults.
+- `COLLECT_DIAGNOSTICS.cmd` packs the logs, the session reports and the crash records into one
+  zip to send with a problem report.
 
-## Recommended settings
+## Set up
 
-| Setting | Value |
-| :--- | :--- |
-| FSR | **Off** — causes corruption in inFAMOUS |
-| Debug → Readbacks | **Precise** |
-| Debug → Direct Memory Access | **On** |
-| Debug → Shader Cache | **On** |
-| Vblank frequency | your target frame rate |
+1. Download the newest `SecondSonAdaptive-windows-x64-build<N>.zip` from
+   [Releases](https://github.com/D4NNY-W4LK3R/infamous-pc/releases) and extract it to a folder
+   of its own, for example `E:\SecondSonAdaptive\Game`.
+2. If Windows says `VCRUNTIME140.dll` is missing, install the
+   [Visual C++ Redistributable 2015-2022 (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe).
+3. Put your PS4 system modules in `user\sys_modules`.
+4. Run **`PLAY_SECOND_SON.cmd`** and paste the path of your game folder the first time.
+5. The first start compiles shaders: expect stutter once. Keep the `user\cache` folder.
 
-The launcher installs a per-game config (`CUSA00223.json`: +512 MB direct memory, precise readbacks, pipeline cache) only if you do not already have one.
+`README_FIRST.txt` in the zip has the full key list, the F1 / F3 options and what every log line
+means. Saves, settings and the shader cache live in a `SecondSonAdaptive-data` folder next to
+your build folders, so a new build picks them up.
 
-**4 GB VRAM cards:** supported by the OOM-retry and part-wise upload work, but keep the shader cache, close other GPU apps, and expect a one-time stutter the first time a new effect (e.g. a new power) appears.
+## Reporting problems
 
-## Tuning
-
-No rebuild needed — set environment variables before launching (e.g. in `Play inFAMOUS.bat`):
-
-| Variable | Default | Effect |
-| :--- | :---: | :--- |
-| `SHAD_READBACK_WINDOW_KB` | `128` | GPU readback window size |
-| `SHAD_PREFETCH_BACKOFF_MAX` | `1` | Stale-window backoff |
-| `SHAD_HOT_WINDOW_SECS` | `5` | How long read-back memory is copied ahead |
-| `SHAD_PREFETCH_OFF` | `0` | `1` disables readback prefetch |
-| `SHAD_AHEAD_MINRUN` / `SHAD_AHEAD_MAX` / `SHAD_AHEAD_BASE` | `2` / `16` / `4` | Page-invalidation lookahead (`MAX=64` restores a wide scan) |
-| `SHADPS4_ASYNC_COMPUTE` | off | `1` routes eligible compute to a second queue, `0` forces it off |
-
-Older builds used a 512–1024 KB window; if you see regressions on a very different GPU, try `SHAD_READBACK_WINDOW_KB=512` and tell us.
-
-## Controls
-
-| Input | Function |
-| :--- | :--- |
-| Xbox / DualShock / DualSense | Works out of the box |
-| Gamepad swipe, L3 / R3 | Touchpad swipes and stick-driven touchpad fingers; two-finger swipes supported |
-| Keyboard | Per-game bindings in the in-app Controller settings (up to 3 keys per action) |
-| `F10` / `F11` / `F12` | FPS counter / fullscreen / screenshot or RenderDoc capture |
+Close the game, run `COLLECT_DIAGNOSTICS.cmd` and attach the `Build<N>_Diagnostics.zip` it makes
+to an [issue](https://github.com/D4NNY-W4LK3R/infamous-pc/issues), with what you did just before
+the problem. Your GPU, driver and the build number are in the zip.
 
 ## Build from source
 
+Every push to a `second-son-adaptive*` branch is built and packaged by GitHub Actions
+(`.github/workflows/second-son-adaptive.yml`) and published under Releases. To build yourself:
+
 ```sh
-git clone --recursive https://github.com/MeWeGo/infamous-pc.git
+git clone --recursive -b second-son-adaptive https://github.com/D4NNY-W4LK3R/infamous-pc.git
 cd infamous-pc
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-Detailed guides: [Windows](./documents/building-windows.md) · [Linux](./documents/building-linux.md) · [macOS](./documents/building-macos.md) · [Docker](./documents/building-docker.md) · [Debugging](./documents/Debugging/Debugging.md)
-
-Run the tests:
+The performance analyser, game patches, cheats' byte checks and input helpers have stand-alone
+unit tests:
 
 ```sh
-cmake -S . -B build -DENABLE_TESTS=ON
-cmake --build build --target shadps4_gcn_test shadps4_settings_test
-./build/tests/shadps4_gcn_test --gtest_filter='Wave64*'
+cmake -S tests/adaptive -B build-adaptive
+cmake --build build-adaptive && build-adaptive/adaptive_tests
 ```
-
-## Reporting problems
-
-Open an [issue](https://github.com/MeWeGo/infamous-pc/issues) with: GPU + driver version, CPU, VRAM, the `shadPS4` log from `%APPDATA%\shadPS4\log`, and an FPS-counter screenshot. Performance reports (even "it runs at X FPS on my GPU") are the most useful thing you can send.
 
 ## Credits
 
-`infamous-pc` stands on other people's work, and we are grateful for it:
-
-- **infamous-pc custom build:** Eye Of The Ruins, 0xDeftones
-- **Parent build:** [rayhlancaner-png/shadPS4-Infamous-FixBuild](https://github.com/rayhlancaner-png/shadPS4-Infamous-FixBuild) — the 1.0.10–1.0.16 performance/VRAM/touchpad line this fork merges; 4 GB OOM fix by TOXIC-KID (#6)
-- **Shader fixes:** the BP01–BP12 backports were ported from [HayatoG/iss_pc](https://github.com/HayatoG/iss_pc), a native PC port of the same game
-- **Emulator:** [shadPS4](https://github.com/shadps4-emu/shadPS4) — [georgemoralis](https://github.com/georgemoralis), [psucien](https://github.com/psucien), [viniciuslrangel](https://github.com/viniciuslrangel), [roamic](https://github.com/roamic), [squidbus](https://github.com/squidbus), [frodo](https://github.com/baggins183), [Stephen Miller](https://github.com/StevenMiller123), [kalaposfos13](https://github.com/kalaposfos13) and all upstream contributors
-
-<a href="https://github.com/MeWeGo/infamous-pc/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=MeWeGo/infamous-pc&max=24">
-</a>
+- **Emulator:** [shadPS4](https://github.com/shadps4-emu/shadPS4) and all its contributors
+- **Game-tuned build:** [infamous-pc](https://github.com/MeWeGo/infamous-pc) (Eye Of The Ruins,
+  0xDeftones) and its parent [shadPS4-Infamous-FixBuild](https://github.com/rayhlancaner-png/shadPS4-Infamous-FixBuild)
+  (4 GB OOM fix by TOXIC-KID)
+- **Native keyboard / mouse groundwork and game patches:** shadPS4-second-son v1.1.1
+- **Cheats:** the GoldHEN cheat database authors (CUSA00004 01.07: Weysincha, 2B) and the dash
+  cheats of Liondarkz/issn_pc
+- **Shader fixes** ported by infamous-pc from [HayatoG/iss_pc](https://github.com/HayatoG/iss_pc)
 
 ## License
 
-[GPL-2.0-or-later](./LICENSE). Upstream: [shadps4-emu/shadPS4](https://github.com/shadps4-emu/shadPS4). Not affiliated with Sony Interactive Entertainment or Sucker Punch Productions; *inFAMOUS* is their trademark.
+[GPL-2.0-or-later](./LICENSE). No game files are included. Not affiliated with Sony Interactive
+Entertainment or Sucker Punch Productions; *inFAMOUS* is their trademark.
