@@ -8,7 +8,7 @@
 
 // Shared between emulator_glue.cpp and adaptive_overlay.cpp only.
 namespace Adaptive::Glue {
-CentralBrain* BrainForOverlay(); ///< null when the optimizer is disabled
+CentralBrain* BrainForOverlay(); ///< null when the analyser is disabled
 UserSettings& SettingsForOverlay();
 void SaveSettingsFromOverlay();
 } // namespace Adaptive::Glue

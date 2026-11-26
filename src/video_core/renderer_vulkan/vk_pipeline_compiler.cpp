@@ -96,12 +96,12 @@ bool PipelineCompiler::IsCompilerThread() noexcept {
 }
 
 u32 PipelineCompiler::DefaultNumWorkers() {
-    // SS_PIPELINE_WORKERS: set by the Second Son Adaptive Shader & Pipeline mini-brain for a
-    // calibration launch or a measured winner, or by the user. Read once, at startup.
+    // SS_PIPELINE_WORKERS: set by the user (the analyser no longer sets start-up values since
+    // build 55). Read once, at startup.
     const u32 builtin = BuiltinNumWorkers();
     const u32 num_threads = std::max(std::thread::hardware_concurrency(), 2U);
     // (No logging here: this file is also built into the stand-alone pipeline compiler test.
-    // The value in effect is in the optimizer's session report.)
+    // The value in effect is in the analyser's session report.)
     u64 chosen = builtin;
     if (const char* text = std::getenv("SS_PIPELINE_WORKERS")) {
         char* end = nullptr;

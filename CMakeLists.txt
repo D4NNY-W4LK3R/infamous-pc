@@ -1295,8 +1295,6 @@ set(ADAPTIVE src/adaptive/adaptive_overlay.cpp
              src/adaptive/knowledge.h
              src/adaptive/mini_brains.cpp
              src/adaptive/mini_brains.h
-             src/adaptive/safety.cpp
-             src/adaptive/safety.h
              src/adaptive/settings.cpp
              src/adaptive/settings.h
              src/adaptive/stats.cpp

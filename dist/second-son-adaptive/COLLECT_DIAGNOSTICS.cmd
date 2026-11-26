@@ -1,7 +1,7 @@
 @echo off
 rem Packs everything needed to diagnose a problem into Build<number>_Diagnostics.zip next to
 rem this file (diagnostics.zip for builds without BUILD.txt):
-rem emulator logs, the optimizer's reports and knowledge, input and mouse settings, system info.
+rem emulator logs, the performance analyser's reports and knowledge, input and mouse settings, system info.
 rem Nothing is uploaded anywhere; send the zip yourself if you want help.
 setlocal
 cd /d "%~dp0"

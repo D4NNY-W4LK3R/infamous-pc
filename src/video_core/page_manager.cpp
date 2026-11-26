@@ -21,6 +21,7 @@
 #include "common/tuning.h"
 #include "core/emulator_settings.h"
 #include "core/memory.h"
+#include "adaptive/emulator_glue.h"
 #include "core/signals.h"
 #include "video_core/buffer_cache/copy_back_log.h"
 #include "video_core/page_manager.h"
@@ -650,7 +651,19 @@ struct SignalImpl : public PageManager::Impl {
         constexpr auto priority = std::numeric_limits<u32>::min();
         Core::Signals::Instance()->RegisterAccessViolationHandler(GuestFaultSignalHandler,
                                                                   priority);
+        // Read once, before the game runs: the fault handler must not read files.
+        fault_ahead = Adaptive::Glue::FaultAhead();
+        if (fault_ahead) {
+            LOG_INFO(Render, "Fault-ahead: on (a game write fault also releases the next page; "
+                             "F3 > Graphics)");
+        }
     }
+
+    /// Fault-ahead (build 55, F3 > Graphics, off by default).
+    static inline bool fault_ahead = false;
+    /// Pages fault-ahead released lately (page << 16 | frame), to count those that fault anyway.
+    static constexpr size_t NumReleased = 8192;
+    static inline std::array<std::atomic<u64>, NumReleased> released{};
 
     ~SignalImpl() override {
         ReportFaultRips(s_total_read_faults.load(std::memory_order_relaxed), true);
@@ -743,6 +756,12 @@ struct SignalImpl : public PageManager::Impl {
         };
         const u64 page = addr >> PageManager::PM_PAGE_BITS;
         Common::Perf::Count(Common::Perf::Counter::WriteFaults);
+        if (fault_ahead) {
+            const u64 entry = released[page % NumReleased].load(std::memory_order_relaxed);
+            if ((entry >> 16) == page && ((frame - (entry & 0xFFFF)) & 0xFFFF) <= 1) {
+                Common::Perf::Count(Common::Perf::Counter::FaultAheadRefaults);
+            }
+        }
         if (faulted_lately(page)) {
             Common::Perf::Count(Common::Perf::Counter::WriteFaultsRepeated);
         } else if (faulted_lately(page - 1)) {
@@ -760,15 +779,28 @@ struct SignalImpl : public PageManager::Impl {
         static const u32 MinRun = static_cast<u32>(Common::Tune("SHAD_AHEAD_MINRUN", 2));
         static const u64 MaxPagesAhead = Common::Tune("SHAD_AHEAD_MAX", 16);
         static const u64 FirstPagesAhead = Common::Tune("SHAD_AHEAD_BASE", 4);
-        if (MaxPagesAhead == 0) {
-            return;
-        }
         thread_local u64 last_page = 0;
         thread_local u32 run = 0;
         const u64 page = addr >> PageManager::PM_PAGE_BITS;
         run = page == last_page + 1 ? run + 1 : 0;
         last_page = page;
         if (run < MinRun) {
+            // Fault-ahead: 37% of the write faults are on the page right after one that just
+            // faulted (builds 52 / 53). Release that page now too; it is uploaded again even if
+            // the game does not write it.
+            if (fault_ahead &&
+                rasterizer->InvalidateBuffersAhead((page + 1) << PageManager::PM_PAGE_BITS,
+                                                   PageManager::PM_PAGE_SIZE)) {
+                Common::Perf::Count(Common::Perf::Counter::FaultAheadPages);
+                const u64 frame = Common::Perf::FrameNumber() & 0xFFFF;
+                released[(page + 1) % NumReleased].store((page + 1) << 16 | frame,
+                                                         std::memory_order_relaxed);
+                // A thread going on faults next on the page after it: the run goes on.
+                last_page = page + 1;
+            }
+            return;
+        }
+        if (MaxPagesAhead == 0) {
             return;
         }
         const u64 pages_ahead =

@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
-      - name: Build and run adaptive optimizer unit tests (GCC + Clang, sanitizers)
+      - name: Build and run performance analyser unit tests (GCC + Clang, sanitizers)
         shell: bash
         run: |
           set -euo pipefail

@@ -247,15 +247,15 @@ void Startup(const std::string& game_serial, const std::string& app_version,
                              "does not end cleanly turns this off");
         }
     }
-    // The frame rate limit is the user's, not the optimizer's: it applies even when the
-    // optimizer is turned off.
+    // The frame rate limit is the user's, not the analyser's: it applies even when the
+    // analyser is turned off.
     Common::FrameLimit::Set(g_settings.frame_limit);
     if (g_settings.frame_limit != 0) {
         LOG_INFO(Render, "Frame rate limit: {} fps", g_settings.frame_limit);
     }
     if (!g_settings.enabled) {
-        LOG_INFO(Render, "Adaptive optimizer: disabled (the emulator runs with its built-in "
-                         "values)");
+        LOG_INFO(Render, "Performance analyser: disabled (no measurements, report or frame-rate "
+                         "target)");
         return;
     }
 
@@ -270,7 +270,6 @@ void Startup(const std::string& game_serial, const std::string& app_version,
     cfg.mode = g_settings.mode;
     cfg.data_dir = g_dir;
     cfg.tick_ms = g_settings.tick_ms;
-    cfg.calibrate_on_battery = g_settings.calibrate_on_battery;
     cfg.fps_target = g_settings.fps_target;
     cfg.perf_mode_floor = g_settings.perf_mode;
     cfg.perf_mode_max = std::max(g_settings.auto_perf_max, g_settings.perf_mode);
@@ -296,12 +295,8 @@ void Startup(const std::string& game_serial, const std::string& app_version,
     }
     bool ok = true;
     ok &= g_brain->RegisterMiniBrain(MakeBufferGeometryBrain(d));
-    ok &= g_brain->RegisterMiniBrain(
-        MakeTextureCacheBrain(d, &g_brain->Memory()),
-        {{KnobId::TextureGcHeadroomMb, AtomicActuator(g_texture_gc_headroom_mb)}},
-        {{KnobId::TextureGcHeadroomMb, -1}});
-    ok &= g_brain->RegisterMiniBrain(
-        MakeTransferSyncBrain(d), {{KnobId::UploadWakeJobs, AtomicActuator(g_upload_wake_jobs)}});
+    ok &= g_brain->RegisterMiniBrain(MakeTextureCacheBrain(d, &g_brain->Memory()));
+    ok &= g_brain->RegisterMiniBrain(MakeTransferSyncBrain(d));
     ok &= g_brain->RegisterMiniBrain(MakeShaderPipelineBrain(d));
     ok &= g_brain->RegisterMiniBrain(MakeFramePacingBrain(d));
     ok &= g_brain->RegisterMiniBrain(MakeCpuWorkloadBrain(d));
@@ -327,15 +322,12 @@ void Startup(const std::string& game_serial, const std::string& app_version,
     if (!Common::FS::SharedUserDirNote().empty()) {
         LOG_INFO(Render, "Adaptive: {}", Common::FS::SharedUserDirNote());
     }
-    LOG_INFO(Render, "Adaptive optimizer: mode {}, knowledge {}, profile {}", ToString(cfg.mode),
+    LOG_INFO(Render, "Performance analyser: knowledge {}, profile {}",
              ToString(res.load_status), MakeFingerprint(g_hardware, sw).ProfileKey());
     LOG_INFO(Render, "Adaptive hardware: {} | {} threads | {} GB RAM | GPU {} (driver {}){}",
              g_hardware.cpu_model, g_hardware.cpu_logical_cores,
              g_hardware.ram_total_bytes >> 30, g_hardware.gpu.name,
              g_hardware.gpu.driver_version, g_hardware.on_battery ? " | ON BATTERY" : "");
-    for (const auto& [k, v] : res.launch_values) {
-        LOG_INFO(Render, "Adaptive: start-up value {} = {} (learned or under test)", k, v);
-    }
     for (const auto& n : res.notes) {
         LOG_INFO(Render, "Adaptive: {}", n);
     }
@@ -371,10 +363,8 @@ void ReportVulkanDevice(const std::string& name, std::uint32_t vendor_id, std::u
         (g_hardware.gpu.device_id != device_id || g_hardware.gpu.vendor_id != vendor_id)) {
         LOG_WARNING(Render,
                     "Adaptive: the renderer uses {:04x}:{:04x}, but start-up discovery picked "
-                    "{:04x}:{:04x}; switching to Observe for this session so nothing learned on "
-                    "one GPU is applied to the other",
+                    "{:04x}:{:04x}; the report's hardware line shows the renderer's",
                     vendor_id, device_id, g_hardware.gpu.vendor_id, g_hardware.gpu.device_id);
-        g_brain->RequestMode(Mode::Observe);
     }
     GpuInfo g;
     g.name = name;
@@ -422,10 +412,7 @@ void Shutdown() {
     }
     Detail::g_active.store(false, std::memory_order_release);
     const auto report = g_brain->Shutdown(g_crashed.load(std::memory_order_relaxed));
-    // Live knobs are back to their defaults; leave the atomics consistent for any late reader.
-    g_texture_gc_headroom_mb.store(0, std::memory_order_relaxed);
-    g_upload_wake_jobs.store(8, std::memory_order_relaxed);
-    LOG_INFO(Render, "Adaptive: session report written to {}", report.string());
+    LOG_INFO(Render, "Performance analyser: session report written to {}", report.string());
     {
         std::scoped_lock lk{g_vram_mutex};
         g_vram_used = {};
@@ -476,7 +463,7 @@ void SaveChanged(const std::function<void(UserSettings&)>& change) {
 GamePatchSettings GamePatches() {
     const UserSettings s = CurrentSettings();
     return GamePatchSettings{s.particle_late_read, s.particle_light_one_submit, s.perf_mode,
-                             s.render_height};
+                             s.render_height, s.office_textures};
 }
 
 std::uint32_t EffectivePerfMode() {
@@ -513,13 +500,15 @@ void SetGamePatches(const GamePatchSettings& patches) {
         s.particle_light_one_submit = patches.particle_light_one_submit;
         s.perf_mode = patches.perf_mode > 2 ? 0 : patches.perf_mode;
         s.render_height = NormalizeRenderHeight(patches.render_height);
+        s.office_textures = patches.office_textures;
     });
     LOG_INFO(Render,
              "Second Son game patches for the next launch: particle late-read {}, lights in one "
-             "submit {}, performance mode {}",
+             "submit {}, performance mode {}, office-level textures {}",
              patches.particle_late_read ? "on" : "off",
              patches.particle_light_one_submit ? "on" : "off",
-             patches.perf_mode == 1 ? "low" : patches.perf_mode == 2 ? "office" : "off");
+             patches.perf_mode == 1 ? "low" : patches.perf_mode == 2 ? "office" : "off",
+             patches.office_textures ? "on" : "off");
     if (g_brain) {
         g_brain->RequestNoteUserSetting(KnobId::PerfMode, patches.perf_mode);
     }
@@ -589,7 +578,7 @@ void SetFlag(bool on, const char* what) {
 } // namespace
 
 namespace {
-/// Reads the settings (the live copy once the optimizer has loaded them), changes them and
+/// Reads the settings (the live copy once the analyser has loaded them), changes them and
 /// saves them (build 52, cheats kept on).
 template <class Change>
 void ChangeSettings(Change&& change) {
@@ -674,6 +663,22 @@ void SetLazyZeroMemory(bool on) {
     }
     LOG_INFO(Render, "Empty buffer memory left out of video memory {} from the next launch",
              on ? "on" : "off");
+}
+
+bool FaultAhead() {
+    if (!g_dir.empty()) {
+        return g_settings.fault_ahead;
+    }
+    const auto dir = Common::FS::GetUserPath(Common::FS::PathType::UserDir) / "adaptive";
+    return LoadSettings(dir / "settings.ini", EnvGet).fault_ahead;
+}
+
+void SetFaultAhead(bool on) {
+    if (FaultAhead() == on) {
+        return;
+    }
+    SaveChanged([on](UserSettings& s) { s.fault_ahead = on; });
+    LOG_INFO(Render, "Fault-ahead {} from the next launch", on ? "on" : "off");
 }
 
 std::uint32_t FrameLimit() {

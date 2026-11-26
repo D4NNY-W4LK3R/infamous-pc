@@ -1,5 +1,5 @@
 SECOND SON ADAPTIVE - inFAMOUS Second Son on PC
-4 GB VRAM build (infamous-pc 1.1.0) + native mouse and keyboard + self-tuning optimizer
+4 GB VRAM build (infamous-pc 1.1.0) + native mouse and keyboard + performance analyser
 ==========================================================================================
 
 You need your own dump of the game (base + update 1.07 merged, the folder with eboot.bin) and
@@ -7,8 +7,8 @@ your PS4 system modules, exactly as for infamous-pc. No game files are included.
 
 INSTALL
   1. Extract this zip to a folder on E:, for example  E:\SecondSonAdaptive\Game
-     Everything the emulator writes (saves, settings, shader cache, logs, what the optimizer
-     learns) goes into the "user" folder next to shadPS4.exe - nothing on C:.
+     Everything the emulator writes (saves, settings, shader cache, logs, the analyser's
+     reports) goes into the "user" folder next to shadPS4.exe - nothing on C:.
   2. If Windows says VCRUNTIME140.dll is missing, install the Visual C++ Redistributable
      2015-2022 x64 once: https://aka.ms/vs/17/release/vc_redist.x64.exe
   3. Put your PS4 system modules in user\sys_modules (create the folders if needed).
@@ -57,9 +57,11 @@ CONTROLS (keyboard and mouse)
                          + right button   = a second finger, one on each half ("Move car")
                        The camera pauses while it is held; the left button still shoots.
   Enter or Esc         pause (Options)                 Arrows  D-pad
-  G / H                tilt the controller left / right (spray can)     T  shake
+  G / H                tilt the controller left / right (spray can)
+  T (hold)             shake the can: HOLD it - a tap is too short for the game to count
+                       (stencils that "did not take T" were tapped, not held)
   Delete               mouse = touchpad (fingerprint scanners); press again to go back
-  F6                   mouse = motion sensor only      F1      optimizer window
+  F6                   mouse = motion sensor only      F1      analyser + cheats window
   Home                 show / hide the key panel
   F10 FPS counter      F11 fullscreen      F12 screenshot      F9 pause the emulator
   A DualSense / DualShock 4 / Xbox pad works at the same time.
@@ -74,22 +76,20 @@ CONTROLS (keyboard and mouse)
                                                  measured; the mouse then moves the right stick
   The F1 window shows the same status. The hook is never forced onto an unknown build.
 
-THE OPTIMIZER (F1)
+THE PERFORMANCE ANALYSER (F1)
+  Build 55: the "adaptive optimizer" is now an honest performance analyser + frame-rate target.
+  In 79 sessions its live tests (two settings changed during play and measured in alternating
+  blocks) and start-up tests never found a change worth keeping, so they are gone: it changes
+  nothing while you play. What every fix came from stays - its measurements and the session
+  report - and so does the frame-rate target's choice of performance mode per launch.
   F1 opens and closes the window. While it is open the mouse is a normal pointer for its
-  buttons; closing it gives the mouse back to the camera.
-  Modes (user\adaptive\settings.ini, or the F1 window):
-    observe      measures only, never changes anything
-    manual       measures and recommends; you click "Try it" to test a change
-    automatic    (default) applies safe live changes during gameplay, measures each one in alternating
-                 10-second blocks, keeps only real improvements, undoes regressions at once,
-                 and reuses what it learned in earlier sessions. It also tests ONE start-up
-                 setting per launch, judged only on pause / menu screens it has seen before
-                 (pausing for a minute now and then gives it the seconds it needs).
-    calibration  as automatic, but start-up tests use the title screen: start the game, let it
-                 reach the title screen, then do not touch anything for 2 minutes.
+  buttons; closing it gives the mouse back to the camera. It shows the frame rate, VRAM, what
+  limits the frame rate now, the frame-rate target's choice, recommendations (settings that are
+  yours to change, as text, with a button where one helps) and the cheats.
+  The "mode" in settings.ini from older builds is still read and changes nothing. What older
+  builds learned stays in knowledge.txt and is not used.
   It knows what is on screen: gameplay (you are pressing keys), cutscene / watching, menu /
-  pause (a still picture), loading / video. A test compares gameplay with gameplay only; a
-  cutscene or the menu pauses it, and quitting keeps its seconds for the next session.
+  pause (a still picture), loading / video, and reports each separately.
   Scene switches (gameplay <-> cutscene, loading) are measured: the report lists the freezes
   and what they were spent on (shader compiling, loading data, shared memory, the card).
   Starting: the shaders you have met so far are loaded before the game starts, with the
@@ -108,16 +108,16 @@ THE OPTIMIZER (F1)
   SS_FAST_FIRST_COMPILE=1 builds an effect shader the game needs right now without the
   driver's optimizations first (the optimized one replaces it). Off by default: on a GTX 1650
   those builds were slower, not quicker.
-  Frame-rate target (F3 > Graphics, next launch): "Optimizer: Frame-Rate Target" 30 and
+  Frame-rate target (F3 > Graphics, next launch): "Frame-Rate Target" 30 and
   "Lowest Quality It May Use" Low or Office. After each launch it checks your gameplay frame
   rate and picks the performance mode for the next one: lower quality when you were under the
   target, back up when the card had plenty of room. It never goes below your limit.
-  What it never does: change graphics settings, the frame-rate / vblank setting, async compute
-  or present mode on its own (those are only recommended), override a value you set yourself
-  in the environment, or keep a change it could not measure as a win.
-  It re-checks learned values by itself when the GPU driver or the emulator build changes, and
-  starts a new profile when the game build or the PC changes. "Forget what was learned" in F1 starts over.
-  Every session writes user\adaptive\latest-report.txt: hardware, decisions, evidence, cost.
+  What it never does: change any other setting (frame-rate limit, present mode, async compute
+  are only recommended), or override a value you set yourself in the environment.
+  It starts a new profile when the game build or the PC changes. "Forget the frame-rate
+  target's choices" in F1 starts over.
+  Every session writes user\adaptive\latest-report.txt: hardware, power, cheats, scenes, what
+  holds the frame rate back, freezes, scene switches, the target's choice, recommendations, cost.
   Turn it off completely: enabled = 0 in user\adaptive\settings.ini (then the emulator behaves
   exactly like the plain 4 GB build).
   With "Smallest Render Size It May Use" set as well, the target goes: your choice -> Low ->
@@ -156,7 +156,10 @@ SECOND SON GAME PATCHES (F3 > Graphics, apply at the next launch; game update 01
             resolution, fewer high-resolution textures (saves video memory).
     Office: even less detail, particles at quarter resolution, no high-resolution textures,
             half the pedestrians.
-  The optimizer recommends Low when the game stays well under 30 fps because of the graphics
+  Office-Level Textures (build 55, off): none of the high-res texture blocks (as Office) with
+    any performance mode. Low + this = Low with Office's textures: frees video memory, softer
+    textures up close. Byte-checked like the others; F1 shows "office-level textures" when on.
+  The analyser recommends Low when the game stays well under 30 fps because of the graphics
   card ("Use next launch" in F1). If anything looks or behaves wrong, turn the patch off in F3.
   Render Size (build 30): the game renders fewer pixels and the picture is scaled to the
     window - 1920x1080 (its own), 1792x1008, 1664x936, 1536x864, 1408x792, 1280x720,
@@ -164,7 +167,7 @@ SECOND SON GAME PATCHES (F3 > Graphics, apply at the next launch; game update 01
     turn on "Enable FSR" in F3 > Graphics for a sharper picture at the smaller sizes.
 
 UPDATING TO A NEW BUILD - ONE DATA FOLDER FOR EVERY BUILD
-  From this build on, saves, shader cache, settings, logs and what the optimizer learned live in
+  From this build on, saves, shader cache, settings, logs and the analyser's reports live in
   "SecondSonAdaptive-data\user", next to your build folders (for example
   E:\Games\...\PhoenixDownloads\SecondSonAdaptive-data\user). Extract each new build in its own
   folder or over an old one: every build next to that folder uses the same data.
@@ -172,8 +175,6 @@ UPDATING TO A NEW BUILD - ONE DATA FOLDER FOR EVERY BUILD
   played most recently (newest save); the old folders are not changed or deleted. The log says
   which one was copied ("Adaptive: data folder ...").
   To keep one build separate, put an empty file named portable.txt next to its shadPS4.exe.
-  What the optimizer learned also survives emulator updates now: learned values are re-checked
-  once instead of being forgotten.
 
 TROUBLESHOOTING
   Run COLLECT_DIAGNOSTICS.cmd (after closing the game, so its report is written) and look at /
@@ -238,6 +239,13 @@ TROUBLESHOOTING
   last 10 s to gpu_hang_record.txt. Build 38 also samples the game's main thread while the
   spray can is out (stencil probe, SS_STENCIL_PROBE=0: off), to find how to tell stencil art
   from other graffiti without P.
+  Build 55, experimental, off by default: F3 > Graphics > "Fault-Ahead: a Write Fault Also
+  Releases the Next Page" (next launch; SS_FAULT_AHEAD=1). 37% of the game's write faults are
+  on the page right after one that just faulted; with this on, that next page is released at
+  the first fault (and uploaded again even if the game does not write it). The log says
+  "Fault-ahead: on" at start and, every 30 s next to the "Perf:" fault line, how many pages it
+  released and how many of those faulted anyway. Compare the "write faults per frame" with a
+  session with it off. The default session stays a clean crash test with both new switches off.
   Back to the plain 4 GB behaviour for one run: set SS_ADAPTIVE=0 and SHADPS4_MOUSE_AIM=0
   before starting, or use the original infamous-pc build - this build never touches its files.
 

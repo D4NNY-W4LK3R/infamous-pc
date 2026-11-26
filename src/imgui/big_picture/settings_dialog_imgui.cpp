@@ -79,6 +79,8 @@ void SettingsWindow::LoadSettings(std::string profile) {
         particleLightsSetting = patches.particle_light_one_submit;
         vramPrioritiesSetting = Adaptive::Glue::VramPriorities();
         lazyZeroSetting = Adaptive::Glue::LazyZeroMemory();
+        officeTexturesSetting = patches.office_textures;
+        faultAheadSetting = Adaptive::Glue::FaultAhead();
         const auto target = Adaptive::Glue::GetFpsTarget();
         const auto it = std::find(fpsTargetValues.begin(), fpsTargetValues.end(), target.fps);
         fpsTargetSetting =
@@ -161,13 +163,16 @@ void SettingsWindow::SaveSettings(std::string profile) {
         const Adaptive::Glue::GamePatchSettings now{particleLateReadSetting,
                                                     particleLightsSetting && particleLateReadSetting,
                                                     static_cast<u32>(perfModeSetting),
-                                                    renderHeightValues.at(renderSizeSetting)};
+                                                    renderHeightValues.at(renderSizeSetting),
+                                                    officeTexturesSetting};
         if (now.perf_mode != before.perf_mode || now.render_height != before.render_height ||
             now.particle_late_read != before.particle_late_read ||
-            now.particle_light_one_submit != before.particle_light_one_submit) {
+            now.particle_light_one_submit != before.particle_light_one_submit ||
+            now.office_textures != before.office_textures) {
             Adaptive::Glue::SetGamePatches(now);
         }
         Adaptive::Glue::SetLazyZeroMemory(lazyZeroSetting);
+        Adaptive::Glue::SetFaultAhead(faultAheadSetting);
         const auto target_before = Adaptive::Glue::GetFpsTarget();
         const Adaptive::Glue::FpsTarget target_now{fpsTargetValues.at(fpsTargetSetting),
                                                    static_cast<u32>(lowestQualitySetting),
@@ -792,16 +797,19 @@ void SettingsWindow::DrawSettingsTable(SettingsCategory category) {
                             frameLimitOptions);
             AddSettingCombo("Second Son: Performance Mode (next launch)", perfModeSetting,
                             perfModeOptions);
+            AddSettingCheckbox("Second Son: Office-Level Textures, No High-Res Blocks (next "
+                               "launch; frees video memory, softer textures up close)",
+                               officeTexturesSetting);
             AddSettingCombo("Second Son: Render Size (next launch; turn on FSR below for a "
                             "sharper picture)",
                             renderSizeSetting, renderSizeOptions);
-            AddSettingCombo("Optimizer: Frame-Rate Target (next launch)", fpsTargetSetting,
+            AddSettingCombo("Frame-Rate Target (next launch)", fpsTargetSetting,
                             fpsTargetOptions);
             if (fpsTargetSetting != 0) {
-                AddSettingCombo("Optimizer: Lowest Quality It May Use", lowestQualitySetting,
-                                lowestQualityOptions);
-                AddSettingCombo("Optimizer: Smallest Render Size It May Use (it tries Low first, "
-                                "then smaller sizes, then Office)",
+                AddSettingCombo("Frame-Rate Target: Lowest Quality It May Use",
+                                lowestQualitySetting, lowestQualityOptions);
+                AddSettingCombo("Frame-Rate Target: Smallest Render Size It May Use (it tries "
+                                "Low first, then smaller sizes, then Office)",
                                 smallestRenderSetting, smallestRenderOptions);
             }
             AddSettingCheckbox("Second Son: Particle Timing Fix (next launch; can cause white "
@@ -814,6 +822,9 @@ void SettingsWindow::DrawSettingsTable(SettingsCategory category) {
             }
             AddSettingCheckbox("Leave Empty Buffer Memory Out of Video Memory (Next Launch)",
                                lazyZeroSetting);
+            AddSettingCheckbox("Fault-Ahead: a Write Fault Also Releases the Next Page "
+                               "(experimental, next launch)",
+                               faultAheadSetting);
             AddSettingSliderInt("Window Width", windowWidthSetting, 0, 8000);
             AddSettingSliderInt("Window Height", windowHeightSetting, 0, 7000);
             AddSettingCheckbox("Enable HDR", hdrAllowedSetting);

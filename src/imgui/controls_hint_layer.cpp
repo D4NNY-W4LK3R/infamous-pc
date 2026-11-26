@@ -50,7 +50,7 @@ const char* MouseState() {
     if (Core::MouseAim::Installed() && Core::MouseAim::CameraLive()) {
         return "Mouse: camera (1:1 mouse look)";
     }
-    return "Mouse: right stick + motion sensor (spray can)";
+    return "Mouse: right stick + motion sensor (spray can; T (hold) = shake)";
 }
 
 class ControlsHintLayer final : public ImGui::Layer {
@@ -97,7 +97,7 @@ public:
             ImGui::TextDisabled("Swipe keys Z X V B / wheel: hold the key to keep the finger down");
             ImGui::TextDisabled("Stencil art: P = spray can sideways (P again: other way / normal)");
             ImGui::TextDisabled("  painting the wrong way: N = flip up / down, M = flip left / right");
-            ImGui::TextDisabled("Home hides this and the small touchpad | F1 optimizer | F7 mouse");
+            ImGui::TextDisabled("Home hides this and the small touchpad | F1 analyser | F7 mouse");
             ImGui::SetWindowFontScale(1.0f);
         }
         ImGui::End();

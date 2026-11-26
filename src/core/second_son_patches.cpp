@@ -127,7 +127,7 @@ std::vector<Site> LightOneSubmitSites() {
 // (20 bytes a row: LOD scale, sun-shadow cascade offset, ...) - row 0, used in normal play, gets
 // the preset; the low-res particle level is always set; the streamer's high-res texture slots
 // (4 nearest blocks) are reduced; office also halves the pedestrian ratios.
-std::vector<Site> PerfModeSites(std::uint32_t mode) {
+std::vector<Site> PerfModeSites(std::uint32_t mode, bool office_textures) {
     const Bytes row0 = {0x00, 0x00, 0x80, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x24,
                         0x74, 0x49, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
     Bytes row = row0;
@@ -136,7 +136,7 @@ std::vector<Site> PerfModeSites(std::uint32_t mode) {
     const std::int32_t cascades = -1;
     std::memcpy(row.data() + 4, &cascades, 4);
     const std::uint8_t particle_level = mode == 1 ? 1 : 2; // 1.0 / 0.5 / 0.25 resolution
-    const std::uint8_t hires_slots = mode == 1 ? 2 : 0;
+    const std::uint8_t hires_slots = mode == 1 && !office_textures ? 2 : 0;
     std::vector<Site> sites = {
         {0xda08c0, row0, row},
         // FUN_8003ed6a0: je over the "set level" store -> 2 NOPs, and the stored level
@@ -152,6 +152,12 @@ std::vector<Site> PerfModeSites(std::uint32_t mode) {
         sites.push_back({0x40c83f, {0x00, 0x00, 0x80, 0x3f}, {0x00, 0x00, 0x00, 0x3f}});
     }
     return sites;
+}
+
+// Office-level textures alone (build 55): only the streamer's high-res texture slots, at 0, for
+// a performance mode of off (with low or office they are part of PerfModeSites).
+std::vector<Site> OfficeTextureSites() {
+    return {{0xfe9a2, {0x04}, {0x00}}, {0xfe9b2, {0x04}, {0x00}}};
 }
 
 // Render size (v1.1.1 SHADPS4_RENDER_HEIGHT, without its live changes): the renderer's size setup
@@ -207,7 +213,9 @@ std::vector<Write> ExpectedOriginals(const Options& options) {
         add(LightOneSubmitSites());
     }
     if (options.perf_mode == 1 || options.perf_mode == 2) {
-        add(PerfModeSites(options.perf_mode));
+        add(PerfModeSites(options.perf_mode, options.office_textures));
+    } else if (options.office_textures) {
+        add(OfficeTextureSites());
     }
     if (options.render_height != 1080 && IsRenderHeight(options.render_height)) {
         add(RenderSizeSites(options.render_height));
@@ -220,7 +228,7 @@ Plan MakePlan(const std::uint8_t* image, std::uint64_t size, const Options& opti
     Plan plan;
     const bool resize = options.render_height != 1080;
     if (!options.particle_late_read && !options.light_one_submit && options.perf_mode == 0 &&
-        !resize) {
+        !options.office_textures && !resize) {
         plan.notes.push_back("Second Son game patches: all turned off");
         return plan;
     }
@@ -250,16 +258,29 @@ Plan MakePlan(const std::uint8_t* image, std::uint64_t size, const Options& opti
     }
     if (options.perf_mode == 1 || options.perf_mode == 2) {
         const char* name = options.perf_mode == 1 ? "low" : "office";
-        if (CheckSites(image, size, readable, PerfModeSites(options.perf_mode),
+        if (CheckSites(image, size, readable,
+                       PerfModeSites(options.perf_mode, options.office_textures),
                        "performance mode", plan)) {
             plan.perf_mode = options.perf_mode;
+            plan.office_textures = options.perf_mode == 2 || options.office_textures;
             plan.notes.push_back(
                 std::string("performance mode ") + name +
                 (options.perf_mode == 1
-                     ? ": LOD 0.7, one sun-shadow cascade less, particles at half resolution, "
-                       "2 high-res texture blocks"
-                     : ": LOD 0.5, one sun-shadow cascade less, particles at quarter resolution, "
-                       "no high-res texture blocks, half the pedestrians"));
+                     ? std::string(": LOD 0.7, one sun-shadow cascade less, particles at half "
+                                   "resolution, ") +
+                           (options.office_textures
+                                ? "no high-res texture blocks (office-level textures)"
+                                : "2 high-res texture blocks")
+                     : std::string(": LOD 0.5, one sun-shadow cascade less, particles at quarter "
+                                   "resolution, no high-res texture blocks, half the "
+                                   "pedestrians")));
+        }
+    } else if (options.office_textures) {
+        if (CheckSites(image, size, readable, OfficeTextureSites(), "office-level textures",
+                       plan)) {
+            plan.office_textures = true;
+            plan.notes.push_back("office-level textures: no high-res texture blocks (full "
+                                 "quality otherwise)");
         }
     }
     if (resize) {

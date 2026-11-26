@@ -57,6 +57,8 @@ enum class Counter : u32 {
     WriteFaults,             ///< Game thread writes to memory the GPU has a copy of.
     WriteFaultsRepeated,     ///< Those on pages that faulted in the same or the previous frame.
     WriteFaultsFollowing,    ///< Those on the page after one that faulted in either frame.
+    FaultAheadPages,         ///< Pages released by fault-ahead (the page after a write fault).
+    FaultAheadRefaults,      ///< Write faults on such a page in the same or the next frame.
     ReadFaults,              ///< Game thread reads of memory the GPU wrote.
     GpuBusyNs,               ///< Nanoseconds the GPU worked on the guest's command buffers.
     GpuDrawRunNs,            ///< Those spent in runs of draws, measured where the runs change.

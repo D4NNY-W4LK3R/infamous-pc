@@ -297,7 +297,7 @@ public:
 
 // --- Rendering & Frame Pacing ------------------------------------------------------------------
 // Present mode and vblank rate change what the player sees and the game's timing, so this
-// brain only recommends (Scope::Never); the Safety Gate enforces that.
+// brain only recommends (Scope::Never).
 class FramePacingBrain final : public KnobBrain {
 public:
     explicit FramePacingBrain(const EmulatorDefaults& d)

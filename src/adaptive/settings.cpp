@@ -162,6 +162,13 @@ UserSettings ParseSettings(const std::string& text) {
                 continue;
             }
             s.vram_priorities = *b;
+        } else if (key == "fault_ahead" || key == "office_textures") {
+            const auto b = ParseBool(value);
+            if (!b) {
+                s.warnings.push_back(key + " '" + value + "' is not 0/1");
+                continue;
+            }
+            (key == "fault_ahead" ? s.fault_ahead : s.office_textures) = *b;
         } else if (key == "particle_late_read" || key == "particle_light_one_submit") {
             const auto b = ParseBool(value);
             if (!b) {
@@ -186,16 +193,13 @@ UserSettings ParseSettings(const std::string& text) {
 
 std::string SerializeSettings(const UserSettings& s) {
     std::ostringstream o;
-    o << "# Second Son Adaptive settings. Changed from the F1 window / Home key, or edit here.\n"
-         "# mode: observe (measure only) | manual (recommend, you apply) |\n"
-         "#       automatic (apply safe, measured live changes during gameplay) |\n"
-         "#       calibration (also test one start-up setting per launch; leave the game idle\n"
-         "#       on the title screen for 2 minutes after it loads)\n";
+    o << "# Second Son Adaptive settings. Changed from the F1 window / F3 settings, or edit here.\n"
+         "# enabled: the performance analyser (measurements, session report, frame-rate target)\n"
+         "# mode: kept so older files load; since build 55 nothing is changed live in any mode\n";
     o << "mode = " << ToString(s.mode) << '\n';
     o << "enabled = " << (s.enabled ? 1 : 0) << '\n';
     o << "overlay = " << (s.overlay ? 1 : 0) << '\n';
     o << "controls_hint = " << (s.controls_hint ? 1 : 0) << '\n';
-    o << "calibrate_on_battery = " << (s.calibrate_on_battery ? 1 : 0) << '\n';
     o << "tick_ms = " << s.tick_ms << '\n';
     o << "# most frames per second shown; 0 = no limit (F3 settings > Graphics)\n";
     o << "frame_limit = " << s.frame_limit << '\n';
@@ -205,12 +209,18 @@ std::string SerializeSettings(const UserSettings& s) {
     o << "perf_mode = " << (s.perf_mode == 1 ? "low" : s.perf_mode == 2 ? "office" : "off") << '\n';
     o << "particle_late_read = " << (s.particle_late_read ? 1 : 0) << '\n';
     o << "particle_light_one_submit = " << (s.particle_light_one_submit ? 1 : 0) << '\n';
+    o << "# office_textures: none of the high-res texture blocks (as Office) with any\n"
+         "#   performance mode - frees video memory, softer textures up close (build 55)\n";
+    o << "office_textures = " << (s.office_textures ? 1 : 0) << '\n';
     o << "# memory priorities for the driver on a card short of video memory: buffers highest,\n"
          "# images drawn to next, textures last (F3 settings > Graphics; next launch)\n";
     o << "vram_priorities = " << (s.vram_priorities ? 1 : 0) << '\n';
     o << "# leave empty buffer memory out of video memory until data lands there (F3 settings >\n"
          "# Graphics; next launch; on by default since build 51)\n";
     o << "empty_memory_out = " << (s.lazy_zero_memory ? 1 : 0) << '\n';
+    o << "# a game write fault also releases the next page (F3 settings > Graphics; next launch;\n"
+         "# build 55, off by default)\n";
+    o << "fault_ahead = " << (s.fault_ahead ? 1 : 0) << '\n';
     o << "# cheats kept on from launch to launch (F1 > Cheats \"keep on\"): 1 = on at every\n"
          "# launch. cheat_smoke_dash: the Smoke dash length kept, 1 (off) to 5 times\n";
     for (std::size_t i = 0; i < CheatKeys.size(); ++i) {
@@ -221,7 +231,7 @@ std::string SerializeSettings(const UserSettings& s) {
         std::snprintf(smoke, sizeof(smoke), "%.1f", static_cast<double>(s.smoke_dash_kept));
         o << "cheat_smoke_dash = " << smoke << '\n';
     }
-    o << "# frame-rate target: the optimizer picks the performance mode per launch, from\n"
+    o << "# frame-rate target: the analyser picks the performance mode per launch, from\n"
          "# perf_mode (your choice) down to auto_perf_max (off | low | office); 0 = off\n";
     o << "fps_target = " << s.fps_target << '\n';
     o << "auto_perf_max = "
@@ -260,6 +270,16 @@ UserSettings LoadSettings(const std::filesystem::path& file,
     if (const auto v = env("SS_LAZY_ZERO_MEMORY")) {
         if (const auto b = ParseBool(*v)) {
             s.lazy_zero_memory = *b;
+        }
+    }
+    if (const auto v = env("SS_FAULT_AHEAD")) {
+        if (const auto b = ParseBool(*v)) {
+            s.fault_ahead = *b;
+        }
+    }
+    if (const auto v = env("SS_OFFICE_TEXTURES")) {
+        if (const auto b = ParseBool(*v)) {
+            s.office_textures = *b;
         }
     }
     if (const auto v = env("SS_VRAM_PRIORITIES")) {

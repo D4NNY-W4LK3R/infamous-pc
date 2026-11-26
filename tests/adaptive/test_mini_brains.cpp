@@ -45,21 +45,16 @@ TEST(MiniBrains, EverySpecIsRegistrableAndOwnedByItsBrain) {
     all.push_back(MakeFramePacingBrain(d));
     all.push_back(MakeCpuWorkloadBrain(d));
     KnobRegistry reg;
-    std::atomic<int> dummy{0};
     std::size_t knobs = 0;
     for (const auto& b : all) {
         for (const auto& k : b->Knobs()) {
             EXPECT_EQ(k.domain, b->GetDomain()) << k.id;
-            std::optional<Actuator> act;
-            if (k.scope == Scope::Live) {
-                dummy = static_cast<int>(k.default_value);
-                act = AtomicActuator(dummy);
-            }
-            EXPECT_TRUE(reg.Register(k, act)) << k.id;
+            EXPECT_NE(k.scope, Scope::Live) << k.id << ": nothing is changed live (build 55)";
+            EXPECT_TRUE(reg.Register(k, std::nullopt)) << k.id;
             ++knobs;
         }
     }
-    EXPECT_GE(knobs, 9u);
+    EXPECT_GE(knobs, 7u);
 }
 
 TEST(MiniBrains, AsyncComputeIsNeverAutomatic) {
@@ -73,21 +68,18 @@ TEST(MiniBrains, AsyncComputeIsNeverAutomatic) {
     FAIL() << "async compute knob missing";
 }
 
-TEST(MiniBrains, TextureCacheReactsToPressureOnly) {
+TEST(MiniBrains, TextureCacheOnlyDescribesPressure) {
+    // Its live knob (earlier cleaning) regressed and was dropped in build 55.
     GpuMemoryBrain mem;
     const auto tex = MakeTextureCacheBrain({}, &mem);
+    EXPECT_TRUE(tex->Knobs().empty());
     Snapshot s = Steady(Bottleneck::MemoryPressure);
     s.resources.vram_budget_bytes = 1000;
     s.resources.vram_used_bytes = 960;
     mem.Think(s, {});
     EXPECT_TRUE(mem.Veto());
-    auto p = tex->Think(s, Defaults(*tex));
-    ASSERT_EQ(p.size(), 1u);
-    EXPECT_EQ(p[0].value, 256);
-    s.resources.vram_used_bytes = 600;
-    mem.Think(s, {});
-    EXPECT_FALSE(mem.Veto());
-    EXPECT_TRUE(tex->Think(s, Defaults(*tex)).empty());
+    EXPECT_TRUE(tex->Think(s, {}).empty());
+    EXPECT_NE(tex->Status().find("VRAM 96% of budget"), std::string::npos) << tex->Status();
 }
 
 TEST(MiniBrains, OverBudgetAllocationsCountAsPressure) {

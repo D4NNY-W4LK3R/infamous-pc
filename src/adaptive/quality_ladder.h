@@ -3,7 +3,7 @@
 
 #pragma once
 
-// The frame-rate target's quality ladder (Architecture v1.1, build 30): the steps the optimizer
+// The frame-rate target's quality ladder (Architecture v1.1, build 30): the steps the analyser
 // may take, one launch at a time, to reach the player's frame rate, from the player's own choice
 // down to the limits they allow. A step is the game's performance mode (its own lower quality
 // levels) and the render size (the game renders fewer pixels and the presenter scales the

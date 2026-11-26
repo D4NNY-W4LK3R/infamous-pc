@@ -150,3 +150,30 @@ TEST(Settings, CheatsKeptOnRoundTrip) {
     EXPECT_TRUE(back.warnings.empty());
     EXPECT_FALSE(ParseSettings("cheat_smoke_dash = 9\n").warnings.empty());
 }
+
+TEST(Settings, Build55SwitchesOffByDefaultRoundTripAndEnvironment) {
+    const auto d = ParseSettings("");
+    EXPECT_FALSE(d.fault_ahead);
+    EXPECT_FALSE(d.office_textures);
+    UserSettings on;
+    on.fault_ahead = true;
+    on.office_textures = true;
+    const auto back = ParseSettings(SerializeSettings(on));
+    EXPECT_TRUE(back.fault_ahead);
+    EXPECT_TRUE(back.office_textures);
+    EXPECT_TRUE(back.warnings.empty());
+    // Start-up tests are gone: an old file's key is read without a warning and not written.
+    const auto old = ParseSettings("calibrate_on_battery = 1\nmode = calibration\n");
+    EXPECT_TRUE(old.warnings.empty());
+    EXPECT_EQ(SerializeSettings(old).find("calibrate_on_battery"), std::string::npos);
+    const auto dir = std::filesystem::temp_directory_path() / "ssa_settings_b55";
+    std::filesystem::create_directories(dir);
+    const auto loaded =
+        LoadSettings(dir / "missing.ini", [](const std::string& k) -> std::optional<std::string> {
+            return k == "SS_FAULT_AHEAD" || k == "SS_OFFICE_TEXTURES"
+                       ? std::optional<std::string>{"1"}
+                       : std::nullopt;
+        });
+    EXPECT_TRUE(loaded.fault_ahead);
+    EXPECT_TRUE(loaded.office_textures);
+}

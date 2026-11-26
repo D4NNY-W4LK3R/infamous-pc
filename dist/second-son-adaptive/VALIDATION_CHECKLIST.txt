@@ -5,12 +5,12 @@ files and your hands. Tick each one, then run COLLECT_DIAGNOSTICS.cmd and keep d
 Every line in quotes is text to look for in user\log\shad_log.txt (or CUSA00223.log).
 
 A. STARTS AND RUNS LIKE THE 4 GB BUILD (baseline preserved)
-  [ ] A1  The game boots to the title screen. Log has "Adaptive optimizer: mode automatic".
+  [ ] A1  The game boots to the title screen. Log has "Performance analyser: knowledge".
   [ ] A2  Load a save, play 5 minutes in the open city. No new crash or graphics problem
           compared with plain infamous-pc 1.1.0 on this PC.
   [ ] A3  Log has "Texture cache: memory budget ... MB" (the 4 GB memory handling is active).
   [ ] A4  With SS_ADAPTIVE=0 set (open cmd in this folder: set SS_ADAPTIVE=0 then
-          PLAY_SECOND_SON.cmd) the log says "Adaptive optimizer: disabled" and the game runs.
+          PLAY_SECOND_SON.cmd) the log says "Performance analyser: disabled" and the game runs.
 
 B. NATIVE MOUSE AND KEYBOARD
   [ ] B1  Log has either "Mouse aim: camera hook at" (true mouse look) or
@@ -18,46 +18,35 @@ B. NATIVE MOUSE AND KEYBOARD
   [ ] B2  If installed: once you walk around freely the log gets "Mouse aim: gameplay camera live"
           and moving the mouse turns the camera immediately, with no stick-like acceleration.
   [ ] B2b Spray painting (the billboard at the start): the pointer follows the mouse (motion
-          sensor), left click sprays, G / H tilt, T shakes the can.
+          sensor), left click sprays, G / H tilt, holding T shakes the can.
   [ ] B2c The panel at the bottom left lists the keys (Space = Cross, ...); Home hides it.
   [ ] B3  - and = change the speed (a notice appears); restart: the speed is remembered.
   [ ] B4  Left click shoots, right click aims; the click that focuses the window does not shoot.
   [ ] B5  F7 releases the mouse (cursor visible), F7 again captures it.
   [ ] B6  W A S D move, Space jumps, Shift dashes, C melee, F interact, Q / E powers, Enter / Esc
           pause, arrows D-pad, R / Y touchpad halves (drain a smoke vent / neon sign).
-  [ ] B7  Spray-can scene: G / H tilt, T shakes (the 4 GB build's motion keys still work).
+  [ ] B7  Spray-can scene: G / H tilt, T held shakes (the 4 GB build's motion keys still work).
   [ ] B8  Delete = mouse as touchpad (use on a fingerprint scanner), Delete again returns to
           mouse look.
   [ ] B9  Menus, cut-scenes and pause: the camera does not jump when gameplay resumes.
   [ ] B10 A controller (if you have one) still works alongside keyboard and mouse.
 
-C. OPTIMIZER - SAFE BY DEFAULT
-  [ ] C1  F1 opens the optimizer window; it shows FPS, frame times, VRAM, "Limit: ..." and the
+C. PERFORMANCE ANALYSER
+  [ ] C1  F1 opens the analyser window; it shows FPS, frame times, VRAM, "Limit: ..." and the
           mouse camera state.
-  [ ] C2  In Manual mode (F1 window) nothing changes by itself: "Values in effect" stay at their defaults.
-  [ ] C3  Quit normally. user\adaptive\latest-report.txt exists and lists your CPU, RAM and
-          "NVIDIA GeForce GTX 1650" with the driver version.
+  [ ] C2  "Settings in effect" stay at their defaults during play (nothing changes by itself).
+  [ ] C3  Quit normally. user\adaptive\latest-report.txt starts with "performance analyser
+          report" and lists your CPU, RAM and "NVIDIA GeForce GTX 1650" with the driver version.
 
-D. OPTIMIZER - CALIBRATION (needs 4-6 short launches)
-  Set Calibration in F1 (or mode = calibration in user\adaptive\settings.ini). For each launch:
-  start, reach the title screen, then do not touch anything for 2 minutes, then close the window.
-  [ ] D1  Launch 1 note in the report: "this launch measures the baseline".
-  [ ] D2  Later launches: "this launch tests <SETTING>=<value> against <default>", and at the
-          end "calibration: <SETTING>=<value> improved|neutral|regressed (median a -> b ms ...)".
-  [ ] D3  A value marked improved is listed as "learned" and is applied on the next launch
-          (log: "Adaptive: start-up value ... (learned or under test)").
+D. BUILD 55 SWITCHES (off by default; one at a time, next launch)
+  [ ] D1  F3 > Graphics > Fault-Ahead on: the log says "Fault-ahead: on" and every 30 s
+          "Fault-ahead: N next pages released per frame". Write faults per frame: ____ (off ____)
+  [ ] D2  F3 > Graphics > Performance Mode Low + Office-Level Textures: F1 > Second Son game
+          patches shows "no high-res texture blocks (office-level textures)". VRAM: ____ GB
 
-E. OPTIMIZER - AUTOMATIC DURING GAMEPLAY
-  Set Automatic in F1. Play normally in the city for 10+ minutes.
-  [ ] E1  If VRAM gets tight, F1 shows "Measuring SS_TEXCACHE_GC_HEADROOM_MB ..." and later a
-          decision with its evidence (kept or reverted). No visible stutter is caused by it.
-  [ ] E2  Recent decisions never show a change to graphics, vblank, present mode or async
-          compute (those may only appear as recommendations).
-
-F. BASELINE vs OPTIMIZED (the performance claim - only these numbers count)
+F. BASELINE vs THIS BUILD (the performance claim - only these numbers count)
   Same save, same spot, same time of day, warm shader cache, F10 counter on:
   [ ] F1  SS_ADAPTIVE=0:  average FPS ______  worst frame ______ ms (stand still 60 s)
-  [ ] F2  Learned profile (Automatic, after calibration): average FPS ______ worst ______ ms
-  If F2 is not better, the optimizer should have kept the defaults - the report says why.
+  [ ] F2  This build (defaults):  average FPS ______  worst frame ______ ms
 
 Send diagnostics.zip with the filled-in checklist if anything fails.

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-# Stand-alone build of the adaptive optimizer and its tests. The optimizer core depends only on
+# Stand-alone build of the performance analyser and its tests. The analyser core depends only on
 # the C++20 standard library, so it is built and tested without the emulator's dependencies:
 #   cmake -S tests/adaptive -B build-adaptive -DGTEST_SOURCE_DIR=<googletest checkout>
 #   cmake --build build-adaptive && build-adaptive/adaptive_tests
@@ -46,7 +46,6 @@ set(ADAPTIVE_SOURCES
     ${SRC}/adaptive/knobs.cpp
     ${SRC}/adaptive/knowledge.cpp
     ${SRC}/adaptive/mini_brains.cpp
-    ${SRC}/adaptive/safety.cpp
     ${SRC}/adaptive/settings.cpp
     ${SRC}/adaptive/stats.cpp
     ${SRC}/adaptive/telemetry.cpp
@@ -71,7 +70,7 @@ add_executable(adaptive_tests
     test_stats.cpp
     test_telemetry.cpp
     test_knowledge.cpp
-    test_safety.cpp
+    test_knobs.cpp
     test_brain.cpp
     test_mini_brains.cpp
     test_settings.cpp

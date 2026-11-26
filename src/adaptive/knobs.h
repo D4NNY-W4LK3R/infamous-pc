@@ -4,12 +4,12 @@
 // Knob registry and workers (actuators).
 //
 // A Live knob is backed by an Actuator: the emulator side holds a std::atomic it reads on its own
-// schedule, and the actuator stores into it. That single store is the only thing the optimizer
+// schedule, and the actuator stores into it. That single store is the only thing the analyser
 // ever does to a running emulator subsystem.
 //
 // A NextLaunch knob is an environment variable the emulator reads once (Common::Tune and
 // friends). The brain sets it at startup, before any subsystem reads it - unless the user set it
-// already, in which case the knob is "pinned" and the optimizer never touches it.
+// already, in which case the knob is "pinned" and the analyser never touches it.
 
 #pragma once
 
@@ -67,7 +67,7 @@ public:
     /// Every Live knob back to its default (the kill switch / Observe mode / shutdown).
     void ResetLiveToDefaults(std::uint64_t now_ns);
 
-    /// NextLaunch: decides each variable's value for this launch. `chosen` holds the optimizer's
+    /// NextLaunch: decides each variable's value for this launch. `chosen` holds the analyser's
     /// picks; env_get / env_set access the process environment. A variable that is already set
     /// pins the knob. Returns knob -> value actually applied by the optimizer.
     std::map<std::string, std::int64_t> ApplyLaunchValues(

@@ -126,7 +126,9 @@ private:
     bool particleLightsSetting = false;
     bool vramPrioritiesSetting = false;
     bool lazyZeroSetting = false;
-    // Frame-rate target: the optimizer picks the performance mode per launch.
+    bool officeTexturesSetting = false; ///< build 55: no high-res texture blocks, next launch
+    bool faultAheadSetting = false;     ///< build 55: a write fault releases the next page too
+    // Frame-rate target: the analyser picks the performance mode per launch.
     const std::vector<std::string> fpsTargetOptions = {"Off", "30", "40", "45", "60"};
     const std::vector<u32> fpsTargetValues = {0, 30, 40, 45, 60};
     int fpsTargetSetting = 0;

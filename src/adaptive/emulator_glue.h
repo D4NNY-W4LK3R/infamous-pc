@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-// The emulator side of the adaptive optimizer: the only file the emulator includes.
+// The emulator side of the performance analyser: the only file the emulator includes.
 //
-// With the optimizer disabled (SS_ADAPTIVE=0 or enabled=0 in settings.ini) none of these do
+// With the analyser disabled (SS_ADAPTIVE=0 or enabled=0 in settings.ini) none of these do
 // anything beyond one relaxed atomic load, and every live knob keeps the emulator's built-in
 // value, so the emulator behaves exactly like the unmodified 4 GB build.
 
@@ -20,9 +20,12 @@ namespace Adaptive::Glue {
 
 // ---- Live knobs: the workers read these on their own schedule (one relaxed load). ----------
 
-/// Texture cache: start garbage collection this many MB earlier (0 = built-in thresholds).
+/// Texture cache: start garbage collection this many MB earlier (0 = built-in thresholds). Since
+/// build 55 nothing changes it at run time (the analyser changes nothing live); kept for the
+/// texture cache that reads it.
 inline std::atomic<std::int32_t> g_texture_gc_headroom_mb{0};
-/// Buffer cache upload worker: wake it once this many jobs are queued (built-in: 8).
+/// Buffer cache upload worker: wake it once this many jobs are queued (built-in: 8; fixed since
+/// build 55).
 inline std::atomic<std::int32_t> g_upload_wake_jobs{8};
 /// Count of allocations that had to go past the VRAM budget (texture + buffer), for the
 /// GPU Memory authority.
@@ -76,7 +79,7 @@ inline void OnFrame(double frame_ms, const double* stall_ms, std::uint32_t num_s
     }
 }
 
-/// SDL event loop: any keyboard / mouse / pad input (calibration measures idle seconds only).
+/// SDL event loop: any keyboard / mouse / pad input (tells gameplay seconds from cutscenes).
 inline void NoteInput() {
     if (Active()) {
         Detail::NoteInputSlow();
@@ -93,6 +96,7 @@ struct GamePatchSettings {
     bool particle_light_one_submit = false;
     std::uint32_t perf_mode = 0; ///< 0 off, 1 low, 2 office
     std::uint32_t render_height = 1080; ///< quality_ladder.h RenderHeights; 1080 = the game's own
+    bool office_textures = false; ///< no high-res texture blocks with any performance mode
 };
 GamePatchSettings GamePatches();
 /// VRAM priorities (F3 > Graphics, next launch): the saved setting, and saving it.
@@ -101,6 +105,9 @@ void SetVramPriorities(bool on);
 /// Empty buffer memory left out of video memory (F3 > Graphics, next launch).
 bool LazyZeroMemory();
 void SetLazyZeroMemory(bool on);
+/// Fault-ahead (F3 > Graphics, next launch; build 55): a write fault also releases the next page.
+bool FaultAhead();
+void SetFaultAhead(bool on);
 /// Saves them for the next launch.
 void SetGamePatches(const GamePatchSettings& patches);
 /// The performance mode this launch uses: the frame-rate target's choice, else the setting.
@@ -108,7 +115,7 @@ std::uint32_t EffectivePerfMode();
 /// The render height this launch uses, the same way.
 std::uint32_t EffectiveRenderHeight();
 
-/// Frame-rate target (F3 > Graphics): the optimizer picks the performance mode per launch, from
+/// Frame-rate target (F3 > Graphics): the analyser picks the performance mode per launch, from
 /// the player's own choice down to lowest_quality (0 = it may not lower quality).
 struct FpsTarget {
     std::uint32_t fps = 0;
@@ -132,7 +139,7 @@ bool LateReadTurnedOffAfterCrash();
 std::uint32_t FrameLimit();
 void SetFrameLimit(std::uint32_t fps);
 
-/// Toggles the F1 optimizer window (drawn by the ImGui layer registered at startup).
+/// Toggles the F1 analyser window (drawn by the ImGui layer registered at startup).
 void ToggleOverlay();
 /// True while the F1 window is open (it needs the mouse pointer, like F3).
 bool OverlayVisible();

@@ -179,7 +179,7 @@ Instance::Instance(Frontend::WindowSDL& window, s32 physical_device_index,
     CollectImageFormatInfo();
     CollectToolingInfo();
 
-    // Second Son Adaptive: the GPU the renderer really uses, for the optimizer's hardware profile.
+    // Second Son Adaptive: the GPU the renderer really uses, for the analyser's hardware profile.
     u64 device_local = 0;
     for (u32 i = 0; i < memory_properties.memoryHeapCount; ++i) {
         if (memory_properties.memoryHeaps[i].flags & vk::MemoryHeapFlagBits::eDeviceLocal) {

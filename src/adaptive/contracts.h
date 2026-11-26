@@ -4,11 +4,11 @@
 // Second Son Adaptive Optimization System - Architecture v1.0 contracts.
 //
 // Every module talks to the others only through the types in this header. The header has no
-// dependency on the emulator, so the whole optimizer builds and is unit tested on its own.
+// dependency on the emulator, so the whole analyser builds and is unit tested on its own.
 //
 // Hierarchy (Architecture v1.0, frozen 2026-11-17):
 //   Central brain      - objectives, budgets, bottleneck diagnosis, arbitration, learning.
-//   Shared services    - Telemetry, Knowledge Base, Safety Gate (not owned by any mini-brain).
+//   Shared services    - Telemetry, Knowledge Base (not owned by any mini-brain).
 //   Mini-brains        - one per domain; propose changes to the knobs they own, nothing else.
 //   Workers            - Actuators: the emulator's own fast paths, reached through one atomic
 //                        store per knob. No brain is ever on a per-draw / per-frame hot path.
@@ -81,7 +81,7 @@ struct KnobSpec {
     std::int64_t default_value; ///< The emulator's built-in value: always a safe fallback.
     std::int64_t min_value;
     std::int64_t max_value;
-    /// Values the optimizer may try, in order of preference; must include default_value. An
+    /// Values the analyser may try, in order of preference; must include default_value. An
     /// empty list means the knob is observe-only (the brain never proposes values for it).
     std::vector<std::int64_t> candidates;
     std::string unit;
@@ -185,7 +185,8 @@ struct Snapshot {
     double gpu_busy_ms_p50 = 0.0;       ///< median host GPU time per frame, 0 = not measured
 };
 
-/// A mini-brain's request. It names a knob of its own domain; the Safety Gate decides.
+/// A mini-brain's suggestion. It names a knob of its own domain; since build 55 only user-only
+/// knobs are passed on, as text.
 struct Proposal {
     std::string knob;
     std::int64_t value = 0;

@@ -389,6 +389,17 @@ void OnFlip() {
                  events_share(Counter::WriteFaultsRepeated, Counter::WriteFaults),
                  events_share(Counter::WriteFaultsFollowing, Counter::WriteFaults),
                  per_frame(Counter::DmaSyncs));
+        if (state.window.Events(Counter::FaultAheadPages) != 0) {
+            // A released page the game then writes does not fault: that is a fault saved. One it
+            // never writes was only uploaded again; one re-protected first faults anyway.
+            const double released = per_frame(Counter::FaultAheadPages);
+            const double refaults = per_frame(Counter::FaultAheadRefaults);
+            LOG_INFO(Render,
+                     "Fault-ahead: {:.0f} next pages released per frame, {:.0f} of them faulted "
+                     "anyway, so at most {:.0f} write faults a frame saved (compare the write "
+                     "faults above with a session with it off)",
+                     released, refaults, std::max(0.0, released - refaults));
+        }
         LOG_INFO(Render, "Perf: threads that spent the most time in page faults: {}",
                  TakeThreadStalls(window_ms));
         const u64 async_work = state.window.Events(Counter::AsyncDispatches) +

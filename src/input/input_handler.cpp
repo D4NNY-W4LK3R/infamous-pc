@@ -144,7 +144,8 @@ constexpr std::string_view GetSecondSonInputConfig() {
 # Touchpad anywhere: hold the middle mouse button (or the back side button) and move the mouse -
 #        a finger on the pad (tap, hold to drain, swipe, slide on the hand scanner); right button
 #        adds a second finger, left button stays R2. Built in, not set here.
-# Motion sensor (global.ini): G / H = tilt left / right, T = shake.
+# Motion sensor (global.ini): G / H = tilt left / right, T (hold) = shake - a tap is too short
+#        for the game to count it (stencils).
 
 axis_left_x_minus = a
 axis_left_x_plus = d
@@ -392,6 +393,9 @@ void RecordHint(std::vector<BindingHint>& hints, const std::string& out, const s
             break;
         }
         start = comma + 1;
+    }
+    if (out == "motion_shake") {
+        keys += " (hold)"; // a tap is too short for the game to count (build 55)
     }
     for (auto& h : hints) {
         if (h.pad == pad) {

@@ -1,14 +1,15 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-// User configuration of the optimizer: <user dir>/adaptive/settings.ini, plain NAME=VALUE lines.
+// User configuration of the performance analyser and the Second Son options:
+// <user dir>/adaptive/settings.ini, plain NAME=VALUE lines.
 //
-//   mode = automatic       observe | manual | automatic | calibration (automatic: the player's
-//                          choice of default; every change is still measured and reverted if worse)
-//   enabled = 1            0 turns the whole optimizer off (no thread, no telemetry)
-//   overlay = 1            the F1 optimizer window is available
+//   mode = automatic       read for older files; changes nothing since build 55 (the analyser
+//                          measures only, in every mode)
+//   enabled = 1            0 turns the whole analyser off (no thread, no telemetry, no report)
+//   overlay = 1            the F1 analyser window is available
 //   controls_hint = 1      on-screen keyboard / mouse equivalents of the button prompts (Home)
-//   calibrate_on_battery = 0
+//   calibrate_on_battery   start-up tests were removed in build 55 (read, not written)
 //   tick_ms = 1000
 //   frame_limit = 0        most frames per second shown (0 = no limit; F3 > Graphics)
 //   perf_mode = off        Second Son's own quality levels: off | low | office (next launch)
@@ -17,7 +18,7 @@
 //                          default: with it on, players saw white flashes and the emulator
 //                          stopped on a page-protection assertion.
 //   particle_light_one_submit = 0  experimental, needs particle_late_read (next launch)
-//   fps_target = 0         the optimizer lowers the game's quality level (per launch) to reach
+//   fps_target = 0         the analyser lowers the game's quality level (per launch) to reach
 //                          this frame rate; 0 = off
 //   auto_perf_max = off    the lowest quality it may use: off (none) | low | office
 //   empty_memory_out = 1   leave empty buffer memory out of video memory (next launch;
@@ -29,6 +30,10 @@
 //   cheat_smoke_dash = 1   Smoke dash length kept on, 1 (off) to 5 times
 //   vram_priorities = 0    memory priorities for the driver: buffers highest, images drawn to
 //                          next, textures last (next launch; SS_VRAM_PRIORITIES)
+//   fault_ahead = 0        build 55: a game write fault also releases the next page (next
+//                          launch; SS_FAULT_AHEAD). Off by default
+//   office_textures = 0    build 55: no high-res texture blocks (the Office level's textures)
+//                          with any performance mode (next launch; SS_OFFICE_TEXTURES). Off
 //
 // Environment variables win over the file (SS_ADAPTIVE_MODE, SS_ADAPTIVE=0). The overlay writes
 // the file back when the user changes the mode, so the choice is remembered.
@@ -65,7 +70,7 @@ struct UserSettings {
     bool particle_late_read = false; // off by default since build 25: flashes and crashes
     bool particle_light_one_submit = false;
     std::uint32_t fps_target = 0;    ///< 0 = off
-    std::uint32_t auto_perf_max = 0; ///< 0 = the optimizer may not lower quality
+    std::uint32_t auto_perf_max = 0; ///< 0 = the frame-rate target may not lower quality
     /// The game's render size: height of one of quality_ladder.h's RenderHeights (1080 = its own;
     /// smaller = fewer pixels, the presenter scales the picture to the window). Next launch.
     std::uint32_t render_height = 1080;
@@ -77,6 +82,12 @@ struct UserSettings {
     /// Empty buffer memory left out of video memory (build 44, next launch): blocks of the large
     /// ranges the game reads that hold only zeros are not made resident until data lands there.
     bool lazy_zero_memory = true;
+    /// Fault-ahead (build 55, next launch): a game thread's write fault also releases the page
+    /// after it, as 37% of the write faults are on the page right after one that just faulted.
+    bool fault_ahead = false;
+    /// Office-level textures (build 55, next launch): none of the streamer's high-res texture
+    /// blocks, whatever the performance mode (Low + this = the build 55 test).
+    bool office_textures = false;
     /// Cheats kept on from launch to launch (build 52): bit i = CheatKeys[i]; and the Smoke
     /// dash length kept (1 = off).
     std::uint32_t cheats_kept_on = 0;

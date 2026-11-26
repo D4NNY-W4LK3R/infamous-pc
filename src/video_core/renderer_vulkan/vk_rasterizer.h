@@ -75,7 +75,8 @@ public:
     u32 ReadDataFromGds(u32 gsd_offset);
     bool InvalidateMemory(VAddr addr, u64 size, bool assume_locks = false);
     /// Marks buffer memory a game thread is about to write as CPU modified ahead of it.
-    void InvalidateBuffersAhead(VAddr addr, u64 size);
+    /// False when nothing was released (not mapped, or the GPU modified it).
+    bool InvalidateBuffersAhead(VAddr addr, u64 size);
     bool ReadMemory(VAddr addr, u64 size, bool assume_locks = false);
     /// Notes memory written past its page protection, like fence values.
     void OnBackingWritten(VAddr addr, u64 size);

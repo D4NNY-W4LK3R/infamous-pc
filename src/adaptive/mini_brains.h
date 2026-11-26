@@ -5,7 +5,8 @@
 //
 // Each owns the knobs of its domain and turns the shared Snapshot into at most a couple of
 // proposals per tick. They hold no locks, own no threads and touch no emulator state; their
-// only output is a Proposal, which the Safety Gate may refuse.
+// only output is a status line and Proposals; the analyser passes on only those for settings
+// that are the player's to change, as text recommendations (build 55).
 //
 // Knob defaults are the emulator's built-in values, passed in by the glue that knows them, so a
 // mini-brain can never drift from what the emulator really does without it.
@@ -33,12 +34,12 @@ struct EmulatorDefaults {
     std::int64_t present_mode = 0;          ///< 0 Mailbox, 1 Fifo, 2 Immediate (settings)
     std::int64_t frame_limit = 0;           ///< fps shown at most, 0 = off (F3 > Graphics)
     std::int64_t perf_mode = 0;             ///< Second Son quality preset 0 off/1 low/2 office
-    bool has_live_texture_gc = true;
-    bool has_live_upload_wake = true;
+    bool has_live_texture_gc = false; ///< live knobs were dropped in build 55
+    bool has_live_upload_wake = false;
 };
 
 /// Global memory authority. Owns no knob; tells the central brain when VRAM is under pressure
-/// so changes that would use more of it are vetoed (Safety Gate rule R7).
+/// for the report and the other areas.
 class GpuMemoryBrain final : public MiniBrain {
 public:
     Domain GetDomain() const override {

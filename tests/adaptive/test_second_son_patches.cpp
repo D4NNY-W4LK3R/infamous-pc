@@ -157,3 +157,50 @@ TEST(SecondSonPatches, OnlyTheListedRenderSizes) {
     const Plan q = MakePlan(img.get(), ImageSize, o, All);
     EXPECT_TRUE(q.writes.empty());
 }
+
+TEST(SecondSonPatches, OfficeTexturesAloneTouchOnlyTheTextureSlots) {
+    Options o;
+    o.particle_late_read = false;
+    o.office_textures = true;
+    const auto img = Image(o);
+    const Plan p = MakePlan(img.get(), ImageSize, o, All);
+    EXPECT_TRUE(p.office_textures);
+    EXPECT_EQ(p.perf_mode, 0u);
+    ASSERT_EQ(p.writes.size(), 2u);
+    for (const auto& w : p.writes) {
+        EXPECT_TRUE(w.offset == 0xfe9a2 || w.offset == 0xfe9b2);
+        EXPECT_EQ(w.bytes, std::vector<std::uint8_t>{0x00});
+    }
+    auto changed = Image(o);
+    changed[0xfe9b2] = 0x03;
+    const Plan refused = MakePlan(changed.get(), ImageSize, o, All);
+    EXPECT_FALSE(refused.office_textures);
+    EXPECT_TRUE(refused.writes.empty());
+}
+
+TEST(SecondSonPatches, LowWithOfficeTexturesHasNoHighResBlocks) {
+    Options o;
+    o.particle_late_read = false;
+    o.perf_mode = 1;
+    o.office_textures = true;
+    const auto img = Image(o);
+    const Plan p = MakePlan(img.get(), ImageSize, o, All);
+    EXPECT_EQ(p.perf_mode, 1u);
+    EXPECT_TRUE(p.office_textures);
+    int slots = 0;
+    for (const auto& w : p.writes) {
+        if (w.offset == 0xfe9a2 || w.offset == 0xfe9b2) {
+            EXPECT_EQ(w.bytes, std::vector<std::uint8_t>{0x00});
+            ++slots;
+        }
+    }
+    EXPECT_EQ(slots, 2);
+    o.office_textures = false;
+    const Plan low = MakePlan(img.get(), ImageSize, o, All);
+    EXPECT_FALSE(low.office_textures);
+    for (const auto& w : low.writes) {
+        if (w.offset == 0xfe9a2) {
+            EXPECT_EQ(w.bytes, std::vector<std::uint8_t>{0x02}) << "low keeps 2 blocks";
+        }
+    }
+}

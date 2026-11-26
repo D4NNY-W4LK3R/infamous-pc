@@ -247,7 +247,7 @@ void WindowSDL::SetIcon(std::span<const u8> png_data) {
 
 namespace {
 
-/// The F3 settings window and the F1 optimizer window need a pointer: while one is open the
+/// The F3 settings window and the F1 analyser window need a pointer: while one is open the
 /// mouse is released (no mouse look, no stick, visible cursor) and afterwards it goes back to the
 /// mode it was in.
 void HandMouseToDialogs(SDL_Window* window) {
@@ -308,7 +308,7 @@ void WindowSDL::WaitEvent() {
     case SDL_EVENT_MOUSE_WHEEL:
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
     case SDL_EVENT_GAMEPAD_AXIS_MOTION:
-        Adaptive::Glue::NoteInput(); // calibration only measures idle seconds
+        Adaptive::Glue::NoteInput(); // tells gameplay seconds from cutscenes
         break;
     default:
         break;

@@ -13,6 +13,9 @@
 //                       cascade less, particles at half resolution, 2 high-res texture blocks;
 //                       office = LOD 0.5, particles at quarter resolution, no high-res texture
 //                       blocks, half the pedestrians.
+//   office textures     build 55: the streamer's high-res texture slots at 0 (as office) with any
+//                       performance mode, e.g. low + office textures: frees video memory, softer
+//                       textures up close.
 //   render size         the game renders at a smaller 16:9 size (e.g. 1408x792 instead of
 //                       1920x1080): the size setup's render and output sizes and the Pro / HDR
 //                       mode switch's size get it; the HUD layout stays at 1920x1080 (so the HUD
@@ -36,6 +39,7 @@ struct Options {
     bool light_one_submit = false;
     std::uint32_t perf_mode = 0; ///< 0 off, 1 low, 2 office
     std::uint32_t render_height = 1080; ///< 1080 = the game's own; see quality_ladder.h
+    bool office_textures = false; ///< no high-res texture blocks, whatever perf_mode is
 };
 
 struct Write {
@@ -48,6 +52,7 @@ struct Plan {
     bool late_read = false;
     bool light_one_submit = false;
     std::uint32_t perf_mode = 0;
+    bool office_textures = false; ///< no high-res texture blocks (office, or the build 55 option)
     std::uint32_t render_width = 1920, render_height = 1080; ///< the size the game renders at
     std::vector<Write> writes;
     std::vector<std::string> notes; ///< one line per decision, for the log and the F1 window

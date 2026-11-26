@@ -114,7 +114,7 @@ std::optional<SharedUserDirResult> ChooseSharedUserDir(const fs::path& exe_dir,
         r.note = "data folder " + shared.string() + " created (no earlier data found)";
     }
     std::ofstream readme(root / "README.txt");
-    readme << "Second Son Adaptive keeps your saves, shader cache, settings and what the optimizer\n"
+    readme << "Second Son Adaptive keeps your saves, shader cache, settings and what the analyser\n"
               "learned here, in the folder \"user\". Every build you extract next to this folder\n"
               "uses it, so updating keeps everything.\n\n"
               "To give one build its own data instead, put an empty file named portable.txt\n"

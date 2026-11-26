@@ -5,7 +5,7 @@
 
 #include <string>
 
-// A short message at the top of the screen (mouse look on / off, mouse speed, optimizer notes).
+// A short message at the top of the screen (mouse look on / off, mouse speed, analyser notes).
 // Safe to call from any thread, also before the renderer exists (then it is shown once it does).
 namespace Overlay::Notice {
 
