@@ -5,7 +5,7 @@
 // Cheats section. Only "infinite" cheats and the dash cheats: no god mode, no karma level, no
 // hotkeys.
 //
-//   from the GoldHEN cheat database, json/CUSA00004_01.07_2.json (credits Weysincha, 2B):
+//   from the GoldHEN cheat database, json/CUSA00004_01.07.json and _2.json (Weysincha, 2B):
 //     infinite energy, infinite bombs / rockets, infinite skill points / shards, infinite
 //     finisher (a code cave and a jump to it)
 //   from branch feature/infamous-second-son-dash-cheats, src/common/infamous_dash_cheats.h,

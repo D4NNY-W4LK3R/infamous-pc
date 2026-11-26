@@ -59,7 +59,7 @@ TEST(SecondSonCheats, GoldHenCheatsFollowTheirBytes) {
         }
     }
     // Other bytes there (another version, or the emulator's own patches): not available.
-    img[0x60c7f9] = 0x48;
+    img[0x20c7f9] = 0x48;
     EXPECT_EQ(Check(img.data(), img.size(), Id::Energy, All), Found::Different);
 }
 
